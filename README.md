@@ -1,35 +1,34 @@
 # Trackply LinkedIn Outreach Agent
 
-**LangGraph-powered agent for precise, high-intent LinkedIn outreach.**
+**LangGraph-powered, LLM-driven agent for high-intent LinkedIn outreach.**
 
-Part of Agentic Labs marketing system for Trackply.
+Part of the Agentic Labs + Trackply marketing flywheel.
 
-## Status
-- Core architecture + prompts in place
-- State management and basic LangGraph loop working
-- Safety-first design (review mode recommended)
-- Next: Full Apify/Supabase integration + conversational handling
+## Current Status (as of latest push)
+- Full LangGraph workflow with supervisor loop
+- LLM-ready nodes (Personalizer, Outreach decision, Conversational)
+- Supabase persistence for leads, logs, conversations
+- Review mode (generate + log, no auto-send)
+- CLI runner with mode flag
+- Strong safety scaffolding
 
-## Why This Matters
-LinkedIn shows us the exact high-intent customers ("Open to Work" + AI freelancer keywords). Broad ads were hitting too many low-intent international signups. This agent lets us reach the right people directly with natural, personalized messages while logging everything for learning.
-
-## Safety First (Non-Negotiable)
-- LinkedIn ToS prohibits automation. Start in **review mode** only.
-- Max 20-30 actions/day initially.
-- Human approval for every send in the beginning.
-- Heavy message variation + natural delays.
-- Log everything. Monitor reply rates.
-- You are responsible for compliance.
+## Safety & Compliance (Read Before Running)
+**LinkedIn strictly prohibits automation.**
+- Use **review mode** exclusively until you have human approval processes.
+- Start with very low daily limits (10-20 actions).
+- Monitor reply sentiment closely.
+- All real sending must go through human review.
+- You are fully responsible for ToS compliance and any account risks.
 
 ## Architecture
-LangGraph multi-agent system:
+LangGraph stateful multi-agent system:
 
-1. **Supervisor** - Rate limits, daily caps, human review triggers, campaign control
-2. **Scout** - Find qualified profiles (Apify LinkedIn actors or browser)
-3. **Personalizer** - Generate natural messages using profile context
-4. **Outreach** - Log to Supabase + (optional) send connection/DM in review mode
-5. **Conversational** - Handle replies, qualify, funnel to Trackply job coach
-6. **Logger** - Persistent state in Supabase
+1. **Supervisor** - Controls flow, enforces limits, triggers human review
+2. **Scout** - Discovers high-intent profiles (Apify or browser)
+3. **Personalizer** - LLM crafts natural messages using profile context + prompts
+4. **Outreach Decider** - LLM decides connection request vs DM vs skip + generates final text
+5. **Logger** - Persists everything to Supabase
+6. **Conversational** - Handles replies, qualifies, escalates
 
 ## Quick Start
 ```bash
@@ -37,45 +36,16 @@ git clone https://github.com/B2B2324/trackply-linkedin-outreach-agent.git
 cd trackply-linkedin-outreach-agent
 pip install -r requirements.txt
 cp .env.example .env
-# Fill in your keys
-python src/runner.py --mode review --campaign test
+# Add your keys
+python src/runner.py --mode review --campaign june22-test
 ```
 
-## Supabase Tables
-Run these in Supabase SQL editor:
-```sql
-CREATE TABLE linkedin_leads (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  profile_url TEXT UNIQUE,
-  name TEXT,
-  headline TEXT,
-  location TEXT,
-  fit_score FLOAT,
-  why_qualified TEXT,
-  status TEXT DEFAULT 'new',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+Run in review mode first. Inspect Supabase tables before any live outreach.
 
-CREATE TABLE outreach_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  lead_id UUID REFERENCES linkedin_leads(id),
-  action TEXT,
-  message TEXT,
-  timestamp TIMESTAMPTZ DEFAULT NOW(),
-  outcome TEXT
-);
+## Recommended Next Development
+- Connect real Apify LinkedIn actor in Scout
+- Add browser automation (Playwright) for sending
+- Build simple web UI for reviewing/approving queued messages
+- Integrate with Trackply job coach for conversational responses
 
-CREATE TABLE conversations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  lead_id UUID REFERENCES linkedin_leads(id),
-  thread JSONB,
-  last_updated TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-## Files
-- `prompts/` - All agent prompts
-- `src/` - Core Python code
-- `src/runner.py` - Easy CLI to run campaigns
-
-Built for Trackply. Let's get the right customers seeing the product.
+This agent lets us reach exactly the users we can see on LinkedIn (Open to Work + AI freelancers) with precision instead of broad ads.
