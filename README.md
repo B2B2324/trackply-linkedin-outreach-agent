@@ -1,19 +1,19 @@
-# Agentic Marketing OS for Trackply
+# Agentic Marketing OS + Personal Brain (MCP Tools)
 
-**Full multi-agent marketing system** built on Agentic Labs + LangGraph.
+## MCP / Plugin Tools
+We now expose clean, callable tools that can be used inside **Claude** and **Grok**:
 
-## What's Built
-- **LinkedIn Outreach Agent** — High-intent targeting + natural founder voice + Job Coach handoff
-- **Reddit Agent** — Post-as-you mode + content + engagement
-- **SEO Content Agent** — Research → Write → Publish pipeline for trackply.com/blogs
-- **Marketing Supervisor** — Orchestrates everything
-- **Langfuse Observability** — Token & cost tracking per agent
-- **Streamlit Dashboard** — Quick overview of campaigns, agents, and spend
+- `run_linkedin_outreach`
+- `generate_seo_article`
+- `recall_from_personal_brain`
+- `set_personal_reminder`
 
-## Quick Start
-```bash
-streamlit run dashboard/app.py
-python src/runner.py --mode review
-```
+### Tier Enforcement
+All tools check the user’s Trackply subscription tier (Free, Pro, Pro Max, Ultra) before executing.
 
-Run the Streamlit dashboard to see agent status and Langfuse links at a glance.
+### How to Use in Claude/Grok
+1. Connect your Trackply account
+2. Call the tools using function calling
+3. Quotas are enforced based on your current plan
+
+This keeps everything monetized while giving users powerful agentic capabilities directly inside their favorite LLMs.
