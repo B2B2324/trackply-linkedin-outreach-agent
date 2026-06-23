@@ -1,31 +1,31 @@
 # Agentic Marketing OS for Trackply
 
-**LangGraph-powered multi-agent system** that runs cheap, precise, automated marketing for Trackply.
+**LangGraph-powered multi-agent marketing system** built on Agentic Labs.
 
-Built on top of **Agentic Labs** (same patterns as the Job Coach, Meta Agent, etc.).
+## Langfuse Integration (Token & Cost Tracking)
+We now have **Langfuse** integrated for full observability:
+- Track token usage per agent (LinkedIn Outreach, Reddit, SEO, etc.)
+- See costs broken down by node/model
+- Nice dashboard to spot expensive agents or prompts
 
-## Vision
-Instead of burning money on broad LinkedIn/Google ads that bring low-intent users, we run an **Agentic Marketing OS**:
-- LinkedIn Outreach Agent (high-intent "Open to Work" + AI freelancers)
-- Reddit Agent (content + engagement, posting as you until karma builds)
-- SEO Content Agent (daily/regular posts to trackply.com/blogs)
-- Future: X/Twitter, email sequences, etc.
-
-All powered by the same LangGraph + Supabase stack as the rest of Agentic Labs.
-
-## Current Status
-- LinkedIn Outreach Agent: Full LLM-driven loop + human approval queue + Job Coach integration
-- Reddit Agent: Skeleton with post-as-me mode
-- SEO Content Agent: Initial researcher → writer → publisher flow
-- Shared patterns across all agents
-
-## Why This Matters
-- Extremely low cost (mostly LLM + Apify calls)
-- High precision targeting
-- Compounds over time (content + relationships)
-- Reusable across Trackply and future Agentic Labs products
-
-## Quick Start (LinkedIn Agent)
-```bash
-python src/runner.py --mode review --campaign test
+### Setup
+1. Create a free/project account at [langfuse.com](https://langfuse.com) or self-host
+2. Add these to your `.env`:
 ```
+LANGFUSE_PUBLIC_KEY=pk-...
+LANGFUSE_SECRET_KEY=sk-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # or your self-hosted URL
+LLM_PROVIDER=anthropic   # or xai / openai
+ANTHROPIC_API_KEY=...     # or XAI_API_KEY / OPENAI_API_KEY
+```
+3. Run any agent → traces appear in Langfuse dashboard
+
+This gives you clear visibility into where agents are spending tokens so you can optimize (cheaper models for simple tasks, better prompts, etc.).
+
+## Current Agents
+- LinkedIn Outreach (with Job Coach handoff)
+- Reddit (post-as-you mode)
+- SEO Content
+- Central Marketing Supervisor
+
+All share the same LangGraph + observability patterns.
