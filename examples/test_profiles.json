@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Sam Patel",
+    "profile_url": "https://linkedin.com/in/sam-patel-ai",
+    "headline": "Open to Work | Prompt Engineer & AI Evaluator | Available for freelance RLHF work",
+    "location": "United States",
+    "about_snippet": "Working on AI data annotation projects. Looking for better ways to manage multiple contracts and job applications.",
+    "fit_score": 8.8
+  },
+  {
+    "name": "Taylor Kim",
+    "profile_url": "https://linkedin.com/in/taylor-kim",
+    "headline": "#OpenToWork | AI Freelancer | Data Annotator | Job Hunting in Tech",
+    "location": "Remote US",
+    "about_snippet": "Currently stacking gigs on Outlier and Micro1. Need help organizing applications and tracking progress.",
+    "fit_score": 9.1
+  }
+]
