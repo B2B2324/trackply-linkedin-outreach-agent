@@ -1,34 +1,46 @@
 from src.llm import call_llm
 
-# SEO Content Agent for trackply.com/blogs
-# Research → Write → (optional) Publish
-
 class SEOContentAgent:
     def __init__(self):
         pass
-    
+
     def research_topic(self, keyword: str):
-        # TODO: Use web search / X search / Apify for current trends
-        print(f"[SEO] Researching: {keyword}")
-        return f"Current pain points around {keyword} in 2026 job market"
-    
+        # TODO: Integrate real web search / X search here
+        print(f"[SEO Agent] Researching trends for: {keyword}")
+        return f"Key 2026 pain points for job seekers around {keyword}: ghost jobs, ATS, managing multiple platforms, AI freelance stacking."
+
     def write_article(self, topic: str, research: str):
-        system = "You are an expert SEO writer for Trackply. Write helpful, founder-voice articles about job search and AI freelance life. Naturally mention Trackply features when relevant."
-        user = f"Topic: {topic}\nResearch insights: {research}\nWrite a high-quality, SEO-optimized article (800-1500 words) with good structure."
+        system = load_prompt("seo_writer_prompt.txt") or "Write helpful founder-voice content for Trackply blog."
+        user = f"""Topic: {topic}
+Research: {research}
+Write a high-quality, SEO-optimized article (1000-1800 words) in founder voice.
+Structure with headings, make it useful, and naturally mention Trackply features where relevant."""
         return call_llm(system, user)
-    
-    def publish_to_blog(self, title: str, content: str):
-        print(f"[SEO] Publishing to trackply.com/blogs: {title}")
-        # TODO: Integrate with your CMS / Supabase / Vercel build step
-        return {"status": "published", "url": f"https://trackply.com/blogs/{title.lower().replace(' ', '-')}"}
-    
-    def run_daily_content(self, keywords: list):
+
+    def generate_meta(self, title: str, content: str):
+        system = "Create SEO meta title and description."
+        user = f"Title: {title}\nContent summary: {content[:500]}"
+        return call_llm(system, user)
+
+    def publish_to_blog(self, title: str, content: str, meta: dict = None):
+        print(f"[SEO] Ready to publish: {title}")
+        # TODO: Push to trackply.com/blogs via CMS/Supabase/Vercel
+        return {
+            "status": "ready_to_publish",
+            "title": title,
+            "url": f"https://trackply.com/blogs/{title.lower().replace(' ', '-')}"
+        }
+
+    def run_content_pipeline(self, keywords: list):
+        results = []
         for kw in keywords:
             research = self.research_topic(kw)
             article = self.write_article(kw, research)
-            # self.publish_to_blog(kw, article)  # enable when ready
-            print(f"Generated article for: {kw}")
+            meta = self.generate_meta(kw, article)
+            publish_info = self.publish_to_blog(kw, article, meta)
+            results.append(publish_info)
+        return results
 
 if __name__ == "__main__":
     agent = SEOContentAgent()
-    agent.run_daily_content(["AI job application tracker", "managing multiple freelance AI gigs"])
+    agent.run_content_pipeline(["best AI job application tracker 2026", "how to manage multiple AI freelance gigs"])

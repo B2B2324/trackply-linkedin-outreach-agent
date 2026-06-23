@@ -1,31 +1,19 @@
 # Agentic Marketing OS for Trackply
 
-**LangGraph-powered multi-agent marketing system** built on Agentic Labs.
+**Full multi-agent marketing system** built on Agentic Labs + LangGraph.
 
-## Langfuse Integration (Token & Cost Tracking)
-We now have **Langfuse** integrated for full observability:
-- Track token usage per agent (LinkedIn Outreach, Reddit, SEO, etc.)
-- See costs broken down by node/model
-- Nice dashboard to spot expensive agents or prompts
+## What's Built
+- **LinkedIn Outreach Agent** — High-intent targeting + natural founder voice + Job Coach handoff
+- **Reddit Agent** — Post-as-you mode + content + engagement
+- **SEO Content Agent** — Research → Write → Publish pipeline for trackply.com/blogs
+- **Marketing Supervisor** — Orchestrates everything
+- **Langfuse Observability** — Token & cost tracking per agent
+- **Streamlit Dashboard** — Quick overview of campaigns, agents, and spend
 
-### Setup
-1. Create a free/project account at [langfuse.com](https://langfuse.com) or self-host
-2. Add these to your `.env`:
+## Quick Start
+```bash
+streamlit run dashboard/app.py
+python src/runner.py --mode review
 ```
-LANGFUSE_PUBLIC_KEY=pk-...
-LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=https://cloud.langfuse.com   # or your self-hosted URL
-LLM_PROVIDER=anthropic   # or xai / openai
-ANTHROPIC_API_KEY=...     # or XAI_API_KEY / OPENAI_API_KEY
-```
-3. Run any agent → traces appear in Langfuse dashboard
 
-This gives you clear visibility into where agents are spending tokens so you can optimize (cheaper models for simple tasks, better prompts, etc.).
-
-## Current Agents
-- LinkedIn Outreach (with Job Coach handoff)
-- Reddit (post-as-you mode)
-- SEO Content
-- Central Marketing Supervisor
-
-All share the same LangGraph + observability patterns.
+Run the Streamlit dashboard to see agent status and Langfuse links at a glance.

@@ -1,34 +1,41 @@
 from src.llm import call_llm
 from src.prompts import load_prompt
 
-# Reddit Agent for Trackply
-# Posts as you (the founder) until subreddit karma builds up
-
 class RedditAgent:
-    def __init__(self, post_as_user=True):
-        self.post_as_user = post_as_user  # True = post as Stephen until karma is high
-        
-    def generate_content(self, topic: str):
-        system = load_prompt("seo_writer_prompt.txt") or "You are a helpful founder sharing real job search advice."
-        user = f"Write a natural Reddit-style post or comment about: {topic}. Keep it authentic, helpful, and lightly mention Trackply if it fits naturally."
-        return call_llm(system, user)
-    
-    def post_to_reddit(self, subreddit: str, title: str, content: str):
-        if self.post_as_user:
-            print(f"[Reddit] Posting as founder to r/{subreddit} (manual approval recommended until karma builds)")
-        else:
-            print(f"[Reddit] Posting via brand account to r/{subreddit}")
-        # TODO: Integrate with PRAW or browser automation
-        print(f"Title: {title}\nContent preview: {content[:200]}...")
-        return {"status": "posted", "subreddit": subreddit}
-    
-    def engage_in_thread(self, post_url: str, comment: str):
-        print(f"[Reddit] Engaging in thread: {post_url}")
-        # TODO: Real comment posting
-        return {"status": "commented"}
+    def __init__(self, post_as_user: bool = True):
+        self.post_as_user = post_as_user
 
-# Example usage
+    def generate_post(self, topic: str, style: str = "founder"):
+        system = load_prompt("seo_writer_prompt.txt") or "Write as the founder of Trackply in a helpful, authentic voice."
+        user = f"""Write a natural Reddit-style post about: {topic}.
+Style: {style} (founder voice - personal, honest, lightly mention Trackply when it fits naturally).
+Make it engaging, not salesy. Include a question at the end to drive comments."""
+        return call_llm(system, user)
+
+    def generate_comment(self, post_context: str):
+        system = "You are responding helpfully on Reddit as the founder of Trackply. Be genuine and add value."
+        user = f"Post context: {post_context}\nWrite a natural, helpful comment that adds value and lightly mentions Trackply if relevant."
+        return call_llm(system, user)
+
+    def post_to_subreddit(self, subreddit: str, title: str, content: str):
+        mode = "as founder (you)" if self.post_as_user else "as Trackply brand"
+        print(f"[Reddit] Posting to r/{subreddit} {mode}")
+        print(f"Title: {title}")
+        print(f"Content preview: {content[:300]}...")
+        # TODO: Add PRAW or browser automation here
+        return {"status": "queued_for_review", "subreddit": subreddit, "title": title}
+
+    def engage_with_post(self, post_url: str, comment: str):
+        print(f"[Reddit] Engaging with post: {post_url}")
+        # TODO: Real commenting
+        return {"status": "comment_queued", "comment": comment}
+
+    def run_daily_engagement(self, topics: list):
+        for topic in topics:
+            post = self.generate_post(topic)
+            self.post_to_subreddit("jobsearch", f"How I'm managing AI freelance + job search chaos", post)
+            # Could also generate comments on relevant threads
+
 if __name__ == "__main__":
     agent = RedditAgent(post_as_user=True)
-    post = agent.generate_content("managing multiple AI freelance gigs while job hunting")
-    agent.post_to_reddit("jobsearch", "How I manage 5 AI gigs + job applications without losing my mind", post)
+    agent.run_daily_engagement(["managing multiple AI gigs while job hunting"])
