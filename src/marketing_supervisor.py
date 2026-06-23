@@ -1,24 +1,15 @@
-from langgraph.graph import StateGraph, END
-
-# Top-level supervisor for the entire Agentic Marketing OS
-# Can orchestrate LinkedIn, Reddit, SEO, and future agents
-
-def marketing_supervisor(state):
-    print("[Marketing Supervisor] Deciding which agents to run today...")
-    # Example logic: run LinkedIn outreach daily, SEO 3x/week, Reddit as needed
-    agents_to_run = ["linkedin_outreach"]
-    if state.get("day_of_week") in [1, 3, 5]:  # Mon, Wed, Fri example
-        agents_to_run.append("seo_content")
-    if state.get("need_reddit_engagement"):
-        agents_to_run.append("reddit")
+def decide_daily_actions(performance_data: dict):
+    """Smarter supervisor that decides what to run based on performance/cost."""
+    actions = ["linkedin_outreach"]
     
-    state["agents_to_run_today"] = agents_to_run
-    return state
+    if performance_data.get("reply_rate", 0) > 15:
+        actions.append("seo_content")  # Double down on content if converting well
+    
+    if performance_data.get("token_spend_24h", 0) < 5:
+        actions.append("reddit_engagement")  # More Reddit if cheap
+    
+    return actions
 
-def build_marketing_graph():
-    workflow = StateGraph(dict)  # Can be expanded with full shared state
-    workflow.add_node("supervisor", marketing_supervisor)
-    # Add edges to individual agents later
-    workflow.set_entry_point("supervisor")
-    workflow.add_edge("supervisor", END)
-    return workflow.compile()
+# Example
+if __name__ == "__main__":
+    print(decide_daily_actions({"reply_rate": 18, "token_spend_24h": 4.2}))
