@@ -1,6 +1,9 @@
 from src.state import OutreachState
 from src.llm import call_llm
-from src.supabase_client import log_lead, log_outreach, save_conversation
+from src.supabase_client import (
+    log_lead, log_outreach, save_conversation,
+    update_lead_status, mark_lead_sent, record_reply, log_activity,
+)
 from src.prompts import load_prompt
 from src.utils import human_like_delay
 from src.error_handler import safe_execute, retry_with_backoff
@@ -63,11 +66,18 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
             target["outreach_decision"] = decision
             
             lead_id = state.get("supabase_lead_ids", {}).get(target.get("profile_url"))
+            profile_url = target.get("profile_url")
+            action = decision.get("action", "skip")
+            message = decision.get("message", "")
+
             if lead_id and config.get("require_human_approval"):
                 from src.approval_queue import add_to_approval_queue
-                add_to_approval_queue(lead_id, decision.get("action"), decision.get("message"), target)
+                add_to_approval_queue(lead_id, action, message, target)
+                update_lead_status(profile_url, "message_drafted")
+                log_activity("linkedin", "approval_requested", profile_url, "pending")
             else:
-                log_outreach(lead_id or "unknown", decision.get("action"), decision.get("message"))
+                mark_lead_sent(profile_url, message)
+                log_outreach(lead_id or "unknown", action, message)
             
             state["messages_sent_today"] = state.get("messages_sent_today", 0) + 1
             if config.get("min_delay_seconds"):
@@ -88,6 +98,7 @@ def conversational_node(state: OutreachState) -> OutreachState:
                 if lead_id:
                     thread = [{"from": "user", "content": target.get('new_reply_content')}, {"from": "assistant", "content": reply}]
                     save_conversation(lead_id, thread)
+                record_reply(target.get("profile_url"), target.get("new_reply_content", ""))
                 target["generated_reply"] = reply
             except Exception as e:
                 state.setdefault("errors", []).append(str(e))
