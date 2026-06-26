@@ -12,8 +12,8 @@ class CampaignConfig(TypedDict, total=False):
     review_mode: bool
 
 default_config: CampaignConfig = {
-    "daily_limit": 25,
-    "weekly_connection_limit": 20,   # conservative; raise if account is established
+    "daily_limit": 80,
+    "weekly_connection_limit": 80,   # LinkedIn hard cap ~100/week; stay under
     "min_delay_seconds": 30,
     "max_delay_seconds": 120,
     "require_human_approval": True,
