@@ -1,10 +1,4 @@
-"""
-Trackply Agentic Marketing OS — Streamlit dashboard.
-Reads from the `marketing_stats` view (anon-readable aggregates) and
-the `linkedin_leads` / `outreach_activity` tables (service-role, via
-SUPABASE_SERVICE_KEY secret set in Streamlit Cloud settings).
-Falls back gracefully to view-only mode if the service key is absent.
-"""
+from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
