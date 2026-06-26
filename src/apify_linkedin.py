@@ -35,7 +35,7 @@ def search_leads(
     }
 
     print(f"[Apify] Searching LinkedIn for: {query!r} (max {max_items})")
-    run = client.actor(SEARCH_ACTOR).call(run_input=run_input)
+    run = client.actor(SEARCH_ACTOR).call(run_input=run_input, wait_secs=90)
 
     if not run or not run.get("defaultDatasetId"):
         print("[Apify] Actor run returned no dataset")

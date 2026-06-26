@@ -102,6 +102,7 @@ def scout_node(state: OutreachState) -> OutreachState:
                 keywords = config.get("target_keywords", ["open to work", "ai evaluator"])
                 leads = search_leads(keywords, max_items=config.get("daily_limit", 10), apify_token=apify_token)
                 state["targets"] = leads
+                state["_leads_discovered"] = len(leads)
                 print(f"[Scout] Apify returned {len(leads)} real leads")
             except Exception as e:
                 state.setdefault("errors", []).append(f"Apify search failed: {e}")
@@ -366,8 +367,19 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
         except Exception as e:
             state.setdefault("errors", []).append(f"Outreach error for {target.get('name')}: {e}")
 
-    # Clear targets after one full pass so they are not re-processed if the
-    # graph loops back through supervisor → scout again (prevents double-sends).
+    # Preserve summary before clearing so the dashboard can report correctly.
+    state["_leads_discovered"] = state.get("_leads_discovered", 0) or len(state.get("targets", []))
+    state["_send_log"] = [
+        {
+            "name":    t.get("name", "?"),
+            "action":  t.get("outreach_decision", {}).get("action", "?"),
+            "result":  t.get("outreach_decision", {}).get("_send_result", "drafted"),
+            "rel":     t.get("relationship_type", "?"),
+            "ol":      t.get("is_open_link", False),
+        }
+        for t in state.get("targets", [])
+    ]
+    # Clear targets after one full pass — prevents double-sends if graph loops.
     state["targets"] = []
     # Signal supervisor to end — one outreach pass per dashboard run is enough.
     state["status"] = "paused"
