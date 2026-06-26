@@ -97,7 +97,7 @@ if st.sidebar.button("🔄 Refresh now"):
 
 # ── Header ───────────────────────────────────────────────────────────────────
 st.title("🚀 Trackply Agentic Marketing OS")
-st.caption("Live data from Trackply Supabase · auto-refreshes every 5 min")
+st.caption("Live data from Trackply Supabase · auto-refreshes every 5 min · v2026-06-26")
 
 with st.spinner("Loading…"):
     s = fetch_stats()
