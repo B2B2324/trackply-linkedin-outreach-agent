@@ -10,9 +10,12 @@ class LinkedInProfile(TypedDict, total=False):
     fit_score: float
     why_qualified: str
     recent_activity_keywords: List[str]
+    # network context — populated by scout
+    relationship_type: str   # '1st' | '2nd' | '3rd' | 'open_link' | 'unknown'
+    is_open_link: bool       # true → free DM without a connection request
     personalized_draft: str
     outreach_decision: Dict[str, Any]
-    reply_example: str  # for testing
+    reply_example: str
 
 class ConversationThread(TypedDict, total=False):
     lead_id: str
@@ -25,6 +28,7 @@ class OutreachState(TypedDict, total=False):
     targets: List[LinkedInProfile]
     current_index: int
     messages_sent_today: int
+    connection_requests_this_week: int   # tracked against weekly_connection_limit
     replies_received: int
     conversations: Dict[str, ConversationThread]
     errors: List[str]

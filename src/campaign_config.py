@@ -2,6 +2,7 @@ from typing import TypedDict
 
 class CampaignConfig(TypedDict, total=False):
     daily_limit: int
+    weekly_connection_limit: int   # LinkedIn caps ~100/week; stay well under
     min_delay_seconds: int
     max_delay_seconds: int
     require_human_approval: bool
@@ -12,13 +13,14 @@ class CampaignConfig(TypedDict, total=False):
 
 default_config: CampaignConfig = {
     "daily_limit": 25,
+    "weekly_connection_limit": 20,   # conservative; raise if account is established
     "min_delay_seconds": 30,
     "max_delay_seconds": 120,
     "require_human_approval": True,
     "target_keywords": ["open to work", "ai evaluator", "prompt engineer", "rlhf", "freelance ai", "job seeker"],
     "excluded_locations": [],
-    "llm_model": "gpt-4o-mini",
-    "review_mode": True
+    "llm_model": "claude-3-5-sonnet-20241022",
+    "review_mode": True,
 }
 
 def load_campaign_config(campaign_id: str = None) -> CampaignConfig:

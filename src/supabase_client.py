@@ -11,16 +11,34 @@ supabase: Client = create_client(url, key)
 
 # ── linkedin_leads ────────────────────────────────────────────────────────────
 
+def count_connection_requests_this_week() -> int:
+    """Return the number of connection_request_sent actions logged in the past 7 days."""
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        r = (supabase.table("outreach_activity")
+             .select("*", count="exact", head=True)
+             .eq("action", "connection_request_sent")
+             .gte("created_at", cutoff)
+             .execute())
+        return r.count or 0
+    except Exception as e:
+        print(f"[supabase_client] count_connection_requests_this_week error: {e}")
+        return 0
+
+
 def log_lead(profile: dict) -> dict | None:
     """Upsert a discovered LinkedIn profile into linkedin_leads."""
     data = {
-        "profile_url":   profile.get("profile_url"),
-        "name":          profile.get("name"),
-        "headline":      profile.get("headline"),
-        "location":      profile.get("location"),
-        "fit_score":     profile.get("fit_score"),
-        "why_qualified": profile.get("why_qualified"),
-        "status":        profile.get("status", "discovered"),
+        "profile_url":       profile.get("profile_url"),
+        "name":              profile.get("name"),
+        "headline":          profile.get("headline"),
+        "location":          profile.get("location"),
+        "fit_score":         profile.get("fit_score"),
+        "why_qualified":     profile.get("why_qualified"),
+        "status":            profile.get("status", "discovered"),
+        "relationship_type": profile.get("relationship_type", "unknown"),
+        "is_open_link":      bool(profile.get("is_open_link", False)),
     }
     response = supabase.table("linkedin_leads").upsert(data, on_conflict="profile_url").execute()
     _log_activity("linkedin", "lead_discovered", profile.get("profile_url"), "success", {

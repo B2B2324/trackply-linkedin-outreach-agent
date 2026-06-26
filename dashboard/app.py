@@ -104,9 +104,7 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
 
     try:
         from src.nodes import build_graph
-        from src.campaign_config import load_campaign_config
-
-        config = load_campaign_config()
+        from src.campaign_config import load_campaign_config, default_config as config
         config["require_human_approval"] = review_mode
         config["review_mode"] = review_mode
         config["daily_limit"] = 5  # keep small for dashboard-triggered runs
@@ -124,14 +122,17 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
 
         leads_found = len(final_state.get("targets", []))
         errors = final_state.get("errors", [])
-        log_lines.append(f"Graph completed. Leads processed: {leads_found}")
+        conn_used = final_state.get("connection_requests_this_week", 0)
+        log_lines.append(f"Graph completed — {leads_found} lead(s) processed.")
+        log_lines.append(f"Connection requests used this week: {conn_used}/{config.get('weekly_connection_limit', 20)}")
         if review_mode:
             log_lines.append("Review mode ON — messages drafted but NOT sent.")
         for t in final_state.get("targets", []):
             decision = t.get("outreach_decision", {})
-            log_lines.append(
-                f"  • {t.get('name', '?')} → action={decision.get('action','?')} | status=drafted"
-            )
+            rel = t.get("relationship_type", "?")
+            ol = " [OpenLink]" if t.get("is_open_link") else ""
+            action = decision.get("action", "?")
+            log_lines.append(f"  • {t.get('name', '?')} ({rel}{ol}) → {action}")
         return {"success": True, "leads_found": leads_found, "errors": errors, "log_lines": log_lines}
 
     except Exception:
