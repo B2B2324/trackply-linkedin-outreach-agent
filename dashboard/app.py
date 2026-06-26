@@ -145,6 +145,49 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
         return {"success": False, "errors": [traceback.format_exc()], "log_lines": log_lines}
 
 
+# ── Reddit agent runner ──────────────────────────────────────────────────────
+def run_reddit_agent(review_mode: bool = True) -> dict:
+    """Invoke the Reddit engagement agent."""
+    for k in ("ANTHROPIC_API_KEY", "XAI_API_KEY",
+              "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
+              "REDDIT_USERNAME", "REDDIT_PASSWORD",
+              "SUPABASE_KEY", "SUPABASE_URL"):
+        val = _secret(k)
+        if val:
+            os.environ[k] = val
+    os.environ.setdefault("SUPABASE_URL", SUPABASE_URL)
+    os.environ.setdefault("SUPABASE_KEY", _secret("SUPABASE_SERVICE_KEY"))
+
+    try:
+        from src.reddit_agent import run_reddit_agent as _run
+        return _run(review_mode=review_mode)
+    except Exception:
+        import traceback
+        return {"success": False, "engagements": [], "threads_found": 0,
+                "errors": [traceback.format_exc()]}
+
+
+def _display_reddit_result(result: dict, live: bool) -> None:
+    mode = "LIVE" if live else "review"
+    if result["success"]:
+        found = result.get("threads_found", 0)
+        eng   = result.get("engagements", [])
+        st.success(f"[{mode}] Reddit agent done — {found} threads found, {len(eng)} engagement(s) prepared.")
+        for e in eng:
+            action = "Posted" if e.get("posted") else "Drafted"
+            st.markdown(f"**{action}** in r/{e.get('subreddit','?')} — [{e.get('title','?')[:60]}]({e.get('thread_url','')})")
+            st.code(e.get("comment", ""), language=None)
+        if result.get("errors"):
+            with st.expander("Notes / non-fatal errors"):
+                for err in result["errors"]:
+                    st.text(err)
+        st.cache_data.clear()
+    else:
+        st.error("Reddit agent run failed.")
+        for err in result.get("errors", []):
+            st.code(err)
+
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.header("Agent Controls")
 
@@ -156,7 +199,8 @@ run_linkedin_live = st.sidebar.button(
     type="primary",
     help="Sends real connection requests and DMs via LinkedIn API",
 )
-st.sidebar.button("▶ Run Reddit Engagement", disabled=True)
+run_reddit = st.sidebar.button("▶ Run Reddit Engagement", help="Find Reddit threads and draft Kemba comments")
+run_reddit_live = st.sidebar.button("🚀 Run Reddit LIVE", type="primary", help="Actually post Kemba comments to Reddit")
 st.sidebar.button("▶ Run SEO Content", disabled=True)
 st.sidebar.divider()
 if st.sidebar.button("🔄 Refresh now"):
@@ -219,6 +263,35 @@ if run_linkedin_live:
         with st.spinner("Running LinkedIn agent in LIVE mode…"):
             result = run_linkedin_agent(review_mode=False)
         _display_run_result(result, live=True)
+
+# ── Run Reddit agent if button clicked ──────────────────────────────────────
+if run_reddit:
+    with st.spinner("Searching Reddit for relevant threads…"):
+        result = run_reddit_agent(review_mode=True)
+    _display_reddit_result(result, live=False)
+
+if run_reddit_live:
+    missing = [k for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
+                            "REDDIT_USERNAME", "REDDIT_PASSWORD")
+               if not _secret(k)]
+    if missing:
+        st.error(
+            f"Missing Streamlit secrets for Reddit: {', '.join(missing)}\n\n"
+            "Add to Streamlit Cloud secrets:\n"
+            "```\n"
+            "REDDIT_CLIENT_ID = \"your_app_client_id\"\n"
+            "REDDIT_CLIENT_SECRET = \"your_app_secret\"\n"
+            "REDDIT_USERNAME = \"your_reddit_username\"\n"
+            "REDDIT_PASSWORD = \"your_reddit_password\"\n"
+            "XAI_API_KEY = \"your_grok_api_key\"\n"
+            "```\n"
+            "Create a Reddit app at reddit.com/prefs/apps (script type)"
+        )
+    else:
+        st.warning("**LIVE MODE** — Kemba will actually post to Reddit.")
+        with st.spinner("Running Reddit agent LIVE…"):
+            result = run_reddit_agent(review_mode=False)
+        _display_reddit_result(result, live=True)
 
 # ── Load data ────────────────────────────────────────────────────────────────
 with st.spinner("Loading…"):

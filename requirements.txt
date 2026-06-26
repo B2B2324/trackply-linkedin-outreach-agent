@@ -9,3 +9,4 @@ langchain-anthropic>=0.3.0
 langchain-openai>=0.2.0
 langfuse
 apify-client
+praw>=7.7.0
