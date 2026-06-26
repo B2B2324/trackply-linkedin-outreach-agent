@@ -5,10 +5,7 @@ import os
 load_dotenv()
 
 url: str = os.environ.get("SUPABASE_URL", "https://vglfaviliadxevfillbb.supabase.co")
-key: str = os.environ.get(
-    "SUPABASE_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnbGZhdmlsaWFkeGV2ZmlsbGJiIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODUyMjgyOSwiZXhwIjoyMDk0MDk4ODI5fQ.Q-UmRrn559HZCDt9cm_i4K3HJFM0qD7an5kDjFazkko",
-)
+key: str = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY", "")
 supabase: Client = create_client(url, key)
 
 
