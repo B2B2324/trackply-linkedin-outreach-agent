@@ -2,3 +2,9 @@ streamlit>=1.40,<2
 supabase>=2.0.0
 pandas>=2.0.0
 python-dotenv
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-openai>=0.2.0
+langfuse
+apify-client
