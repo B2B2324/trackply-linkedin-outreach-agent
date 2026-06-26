@@ -74,11 +74,14 @@ def fetch_activity() -> list[dict]:
     if not sb:
         return []
     try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         return (
             sb.table("outreach_activity")
             .select("agent,action,target,result,created_at")
+            .gte("created_at", cutoff)
             .order("created_at", desc=True)
-            .limit(40)
+            .limit(50)
             .execute()
         ).data or []
     except Exception:
@@ -97,16 +100,30 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
     if not anthropic_key:
         return {"success": False, "errors": ["ANTHROPIC_API_KEY not set in Streamlit secrets."]}
 
-    # Inject env vars so src/ modules can pick them up
+    # Inject env vars — always overwrite so stale cached values from a
+    # previous Streamlit session don't block fresh secret values.
     os.environ["ANTHROPIC_API_KEY"] = anthropic_key
-    os.environ.setdefault("SUPABASE_KEY", _secret("SUPABASE_SERVICE_KEY"))
-    os.environ.setdefault("SUPABASE_URL", SUPABASE_URL)
-    # LinkedIn sending credentials
+    svc_key = _secret("SUPABASE_SERVICE_KEY")
+    if svc_key:
+        os.environ["SUPABASE_KEY"]         = svc_key
+        os.environ["SUPABASE_SERVICE_KEY"] = svc_key
+    os.environ["SUPABASE_URL"] = SUPABASE_URL
     for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID", "LINKEDIN_CSRF_TOKEN",
               "LINKEDIN_OWN_PROFILE_URL", "APIFY_TOKEN"):
         val = _secret(k)
         if val:
             os.environ[k] = val
+
+    # Warn upfront if live-mode creds are incomplete (saves a full graph run)
+    if not review_mode:
+        missing_creds = [k for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID",
+                                      "LINKEDIN_CSRF_TOKEN", "LINKEDIN_OWN_PROFILE_URL")
+                         if not os.environ.get(k)]
+        if missing_creds:
+            return {"success": False, "errors": [
+                f"Missing LinkedIn secrets: {', '.join(missing_creds)}. "
+                "Go to Streamlit Cloud → Settings → Secrets and add them."
+            ], "log_lines": []}
 
     try:
         from src.nodes import build_graph
@@ -135,10 +152,11 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
             log_lines.append("Review mode ON — messages drafted but NOT sent.")
         for t in final_state.get("targets", []):
             decision = t.get("outreach_decision", {})
-            rel = t.get("relationship_type", "?")
-            ol = " [OpenLink]" if t.get("is_open_link") else ""
+            rel    = t.get("relationship_type", "?")
+            ol     = " [OpenLink]" if t.get("is_open_link") else ""
             action = decision.get("action", "?")
-            log_lines.append(f"  • {t.get('name', '?')} ({rel}{ol}) → {action}")
+            status = "drafted" if review_mode else decision.get("_send_result", action)
+            log_lines.append(f"  • {t.get('name', '?')} ({rel}{ol}) → {action} [{status}]")
         return {"success": True, "leads_found": leads_found, "errors": errors, "log_lines": log_lines}
 
     except Exception:
@@ -150,13 +168,15 @@ def run_reddit_agent(review_mode: bool = True) -> dict:
     """Invoke the Reddit engagement agent."""
     for k in ("ANTHROPIC_API_KEY", "XAI_API_KEY",
               "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET",
-              "REDDIT_USERNAME", "REDDIT_PASSWORD",
-              "SUPABASE_KEY", "SUPABASE_URL"):
+              "REDDIT_USERNAME", "REDDIT_PASSWORD"):
         val = _secret(k)
         if val:
             os.environ[k] = val
-    os.environ.setdefault("SUPABASE_URL", SUPABASE_URL)
-    os.environ.setdefault("SUPABASE_KEY", _secret("SUPABASE_SERVICE_KEY"))
+    svc_key = _secret("SUPABASE_SERVICE_KEY")
+    if svc_key:
+        os.environ["SUPABASE_KEY"]         = svc_key
+        os.environ["SUPABASE_SERVICE_KEY"] = svc_key
+    os.environ["SUPABASE_URL"] = SUPABASE_URL
 
     try:
         from src.reddit_agent import run_reddit_agent as _run

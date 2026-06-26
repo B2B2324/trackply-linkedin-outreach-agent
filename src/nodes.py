@@ -322,10 +322,12 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
                 if send_result["success"]:
                     mark_lead_sent(profile_url, message)
                     result_label = "success"
+                    decision["_send_result"] = "sent ✓"
                     print(f"  [sent] {target.get('name')} → {action}")
                 else:
                     update_lead_status(profile_url, "send_failed", note=send_result.get("detail", ""))
                     result_label = "failed"
+                    decision["_send_result"] = f"failed: {send_result.get('detail', '')[:60]}"
                     state.setdefault("errors", []).append(
                         f"Send failed for {target.get('name')}: {send_result.get('detail')}"
                     )
