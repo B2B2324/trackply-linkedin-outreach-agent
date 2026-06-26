@@ -278,11 +278,21 @@ if run_linkedin_live:
             "Get cookie values from Chrome DevTools → Application → Cookies → www.linkedin.com"
         )
     else:
-        st.warning(
-            "**LIVE MODE** — this will send real LinkedIn messages. "
-            "Make sure your weekly connection budget isn't exhausted."
+        weekly_used = 0
+        try:
+            from src.supabase_client import count_connection_requests_this_week
+            weekly_used = count_connection_requests_this_week()
+        except Exception:
+            pass
+        budget_remaining = max(0, 80 - weekly_used)
+        budget_note = (
+            f"⚠️ **Connection budget: {weekly_used}/80 used this week.**  \n"
+            + ("Budget exhausted — agent will DM your existing 1st-degree connections only."
+               if budget_remaining == 0 else
+               f"{budget_remaining} connection requests remaining — will also search via Apify.")
         )
-        with st.spinner("Running LinkedIn agent in LIVE mode…"):
+        st.warning(f"**LIVE MODE** — real LinkedIn messages will be sent.\n\n{budget_note}")
+        with st.spinner("Running LinkedIn agent in LIVE mode… (5–20 min for up to 80 leads)"):
             result = run_linkedin_agent(review_mode=False)
         _display_run_result(result, live=True)
 

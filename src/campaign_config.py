@@ -14,8 +14,8 @@ class CampaignConfig(TypedDict, total=False):
 default_config: CampaignConfig = {
     "daily_limit": 80,
     "weekly_connection_limit": 80,   # LinkedIn hard cap ~100/week; stay under
-    "min_delay_seconds": 30,
-    "max_delay_seconds": 120,
+    "min_delay_seconds": 8,
+    "max_delay_seconds": 25,
     "require_human_approval": True,
     "target_keywords": ["open to work", "ai evaluator", "prompt engineer", "rlhf", "freelance ai", "job seeker"],
     "excluded_locations": [],

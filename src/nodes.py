@@ -96,23 +96,74 @@ def scout_node(state: OutreachState) -> OutreachState:
         live_mode = not config.get("review_mode", True)
         apify_token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
 
-        if live_mode and apify_token:
-            try:
-                from src.apify_linkedin import search_leads
-                keywords = config.get("target_keywords", ["open to work", "ai evaluator"])
-                leads = search_leads(keywords, max_items=config.get("daily_limit", 10), apify_token=apify_token)
-                state["targets"] = leads
-                state["_leads_discovered"] = len(leads)
-                print(f"[Scout] Apify returned {len(leads)} real leads")
-            except Exception as e:
-                state.setdefault("errors", []).append(f"Apify search failed: {e}")
-                state["targets"] = []
+        weekly_limit = config.get("weekly_connection_limit", 80)
+        conn_used    = state.get("connection_requests_this_week", 0)
+        budget_gone  = conn_used >= weekly_limit
 
-            # Terminate cleanly if no leads found — prevents infinite loop
-            if not state["targets"]:
-                msg = "No leads discovered via Apify. Check APIFY_TOKEN and actor availability."
-                state.setdefault("errors", []).append(msg)
-                print(f"[Scout] {msg}")
+        if live_mode:
+            if budget_gone:
+                # No connection budget — skip Apify (it returns "unknown" degree which all get skipped).
+                # Instead fetch actual 1st-degree connections via the user's LinkedIn cookies.
+                print("[Scout] Connection budget exhausted — fetching 1st-degree connections to DM directly.")
+                try:
+                    from src.linkedin_sender import sender_from_env
+                    sender = sender_from_env()
+                    if sender:
+                        leads = sender.get_my_connections(limit=config.get("daily_limit", 80))
+                        state["targets"] = leads
+                        state["_leads_discovered"] = len(leads)
+                        print(f"[Scout] Fetched {len(leads)} 1st-degree connections to DM")
+                    else:
+                        state["targets"] = []
+                        state.setdefault("errors", []).append(
+                            "LinkedIn credentials missing — cannot fetch connections. "
+                            "Set LINKEDIN_LI_AT, LINKEDIN_JSESSIONID, LINKEDIN_CSRF_TOKEN in Streamlit secrets."
+                        )
+                except Exception as e:
+                    state.setdefault("errors", []).append(f"Connections fetch failed: {e}")
+                    state["targets"] = []
+
+                if not state["targets"]:
+                    state["status"] = "paused"
+                    return state
+
+            elif apify_token:
+                try:
+                    from src.apify_linkedin import search_leads
+                    keywords = config.get("target_keywords", ["open to work", "ai evaluator"])
+                    leads = search_leads(keywords, max_items=config.get("daily_limit", 80), apify_token=apify_token)
+                    state["targets"] = leads
+                    state["_leads_discovered"] = len(leads)
+                    print(f"[Scout] Apify returned {len(leads)} leads")
+                except Exception as e:
+                    state.setdefault("errors", []).append(f"Apify search failed: {e}")
+                    state["targets"] = []
+
+                if not state["targets"]:
+                    # Apify returned 0 — try fetching own connections as fallback
+                    print("[Scout] Apify returned 0 leads — trying 1st-degree connections as fallback.")
+                    try:
+                        from src.linkedin_sender import sender_from_env
+                        sender = sender_from_env()
+                        if sender:
+                            leads = sender.get_my_connections(limit=config.get("daily_limit", 80))
+                            state["targets"] = leads
+                            state["_leads_discovered"] = len(leads)
+                            state.setdefault("errors", []).append(
+                                "Apify returned 0 results — fell back to 1st-degree connections."
+                            )
+                    except Exception as e2:
+                        state.setdefault("errors", []).append(f"Connection fallback also failed: {e2}")
+
+                if not state["targets"]:
+                    msg = "No leads discovered (Apify and connections fallback both returned 0)."
+                    state.setdefault("errors", []).append(msg)
+                    print(f"[Scout] {msg}")
+                    state["status"] = "paused"
+                    return state
+            else:
+                state.setdefault("errors", []).append("No APIFY_TOKEN set in Streamlit secrets.")
+                state["targets"] = []
                 state["status"] = "paused"
                 return state
         else:

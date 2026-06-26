@@ -225,6 +225,119 @@ class LinkedInSender:
             return {"success": False, "detail": str(e)}
 
 
+    # ── Fetch own connections ─────────────────────────────────────────────────
+
+    def get_my_connections(self, limit: int = 80, keywords: str = "") -> list[dict]:
+        """
+        Fetch the user's 1st-degree LinkedIn connections via the voyager API.
+        Returns normalised lead-compatible dicts (relationship_type='1st').
+        Used when connection budget is exhausted and we can only DM.
+        """
+        results: list[dict] = []
+        start = 0
+        batch = 50
+
+        while len(results) < limit:
+            params: dict = {
+                "q":     "search",
+                "start": start,
+                "count": min(batch, limit - len(results)),
+                "network": "F",    # F = 1st degree
+            }
+            if keywords:
+                params["keywords"] = keywords
+
+            try:
+                r = self.session.get(
+                    f"{_BASE}/search/dash/clusters",
+                    params={
+                        "decorationId": "com.linkedin.voyager.dash.deco.search.SearchClusterCollection-175",
+                        "origin":       "GLOBAL_SEARCH_HEADER",
+                        "q":            "all",
+                        "query":        f"(keywords:{keywords or ''},filters:List((filter:network,values:List((value:F,selectionType:INCLUDED)))))",
+                        "start":        start,
+                        "count":        min(batch, limit - len(results)),
+                    },
+                    timeout=_TIMEOUT,
+                )
+            except Exception as e:
+                print(f"[LinkedInSender] get_my_connections search failed: {e}")
+                break
+
+            if not r.ok:
+                # Fallback: try the simpler connections endpoint
+                try:
+                    r2 = self.session.get(
+                        f"{_BASE}/relationships/connections",
+                        params={"q": "search", "start": start,
+                                "count": min(batch, limit - len(results))},
+                        timeout=_TIMEOUT,
+                    )
+                    if not r2.ok:
+                        print(f"[LinkedInSender] connections endpoint returned {r2.status_code}")
+                        break
+                    data = r2.json()
+                    elements = data.get("elements", [])
+                except Exception as e:
+                    print(f"[LinkedInSender] connections fallback failed: {e}")
+                    break
+            else:
+                try:
+                    data = r.json()
+                    # Flatten search cluster results
+                    elements = []
+                    for cluster in data.get("elements", []):
+                        for item in cluster.get("items", []):
+                            p = item.get("item", {}).get("entityResult") or item.get("item", {})
+                            if p:
+                                elements.append(p)
+                except Exception:
+                    break
+
+            if not elements:
+                break
+
+            for el in elements:
+                # Handle both search result shape and connections shape
+                mini = (
+                    el.get("miniProfile")
+                    or el.get("*miniProfile")
+                    or el
+                )
+                fn   = mini.get("firstName", "")
+                ln   = mini.get("lastName", "")
+                name = f"{fn} {ln}".strip() or mini.get("fullName", "")
+                pid  = mini.get("publicIdentifier") or mini.get("vanityName", "")
+                if not pid or not name:
+                    continue
+                profile_url = f"https://www.linkedin.com/in/{pid}"
+                headline    = mini.get("occupation") or el.get("headline", {}).get("text", "")
+                location    = (el.get("subline") or {}).get("text", "")
+                member_id   = str(mini.get("objectUrn", "")).split(":")[-1]
+                results.append({
+                    "name":                     name,
+                    "profile_url":              profile_url,
+                    "headline":                 headline,
+                    "location":                 location,
+                    "about_snippet":            "",
+                    "fit_score":                7.0,
+                    "why_qualified":            "1st-degree LinkedIn connection — can DM directly",
+                    "recent_activity_keywords": [],
+                    "relationship_type":        "1st",
+                    "is_open_link":             False,
+                    "_linkedin_member_id":      member_id,
+                })
+                if len(results) >= limit:
+                    break
+
+            if len(elements) < batch:
+                break   # no more pages
+            start += batch
+
+        print(f"[LinkedInSender] get_my_connections → {len(results)} connections fetched")
+        return results
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 def sender_from_env() -> LinkedInSender | None:

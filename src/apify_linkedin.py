@@ -75,9 +75,10 @@ def _normalise(item: dict, query: str) -> dict | None:
 def _run_single_search(client: ApifyClient, query: str, max_items: int) -> list[dict]:
     """Run one Apify search and return raw items."""
     run_input = {
-        "searchQuery":      query,
-        "maxItems":         max_items,
-        "connectionDegree": "F",   # prefer 1st-degree; actor may or may not honour this
+        "searchQuery": query,
+        "maxItems":    max_items,
+        # No connectionDegree filter — Apify uses its own session so it can't
+        # know YOUR connection degree. We map degree after the fact.
     }
     print(f"[Apify] Query: {query!r} (max {max_items})")
     try:
