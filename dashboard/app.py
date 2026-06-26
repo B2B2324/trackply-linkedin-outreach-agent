@@ -130,7 +130,7 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
         from src.campaign_config import load_campaign_config, default_config as config
         config["require_human_approval"] = review_mode
         config["review_mode"] = review_mode
-        config["daily_limit"] = 5  # keep small for dashboard-triggered runs
+        config["daily_limit"] = 10  # per dashboard run
 
         initial_state = {
             "targets": [],

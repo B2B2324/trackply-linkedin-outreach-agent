@@ -29,12 +29,16 @@ def search_leads(
     # on this actor; plain keywords work much better.
     query = " ".join(keywords[:4])
 
+    # Prefer 1st-degree connections (can DM without invite) and OpenLink profiles.
+    # connectionDegree filter may not be supported by all actor versions —
+    # if actor ignores it we still filter client-side below.
     run_input = {
-        "searchQuery": query,
-        "maxItems":    max_items,
+        "searchQuery":      query,
+        "maxItems":         max_items,
+        "connectionDegree": "F",   # "F" = 1st degree on LinkedIn; actor may map this
     }
 
-    print(f"[Apify] Searching LinkedIn for: {query!r} (max {max_items})")
+    print(f"[Apify] Searching LinkedIn for: {query!r} (max {max_items}, prefer 1st-degree)")
     run = client.actor(SEARCH_ACTOR).call(run_input=run_input, wait_secs=90)
 
     if not run or not run.get("defaultDatasetId"):
@@ -68,6 +72,19 @@ def search_leads(
         hits     = sum(1 for kw in ai_kws if kw in headline.lower() or kw in about.lower())
         fit_score = min(10.0, 6.0 + hits * 0.5)
 
+        # Map connectionDegree → relationship_type understood by the decider
+        degree = item.get("connectionDegree") or item.get("distance") or ""
+        if str(degree) in ("1", "DISTANCE_1"):
+            rel = "1st"
+        elif str(degree) in ("2", "DISTANCE_2"):
+            rel = "2nd"
+        elif str(degree) in ("3", "DISTANCE_3"):
+            rel = "3rd"
+        else:
+            rel = "unknown"
+
+        is_open_link = bool(item.get("openLink") or item.get("isOpenLink"))
+
         leads.append({
             "name":                     name,
             "profile_url":              profile_url,
@@ -77,8 +94,8 @@ def search_leads(
             "fit_score":                round(fit_score, 1),
             "why_qualified":            f"Found via LinkedIn search: {query}",
             "recent_activity_keywords": ai_kws[:3],
-            "relationship_type":        "unknown",
-            "is_open_link":             bool(item.get("openLink") or item.get("isOpenLink")),
+            "relationship_type":        rel,
+            "is_open_link":             is_open_link,
             "_linkedin_member_id":      str(item.get("memberId") or item.get("profileId") or ""),
         })
 
