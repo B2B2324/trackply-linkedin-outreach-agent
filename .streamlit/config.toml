@@ -1,0 +1,8 @@
+# Streamlit config — dark theme to match the Agentic Labs dashboard it's
+# embedded into (teal accent), so the Marketing tab feels native.
+[theme]
+base = "dark"
+primaryColor = "#14b8a6"
+
+[server]
+headless = true
