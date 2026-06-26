@@ -106,6 +106,14 @@ def scout_node(state: OutreachState) -> OutreachState:
             except Exception as e:
                 state.setdefault("errors", []).append(f"Apify search failed: {e}")
                 state["targets"] = []
+
+            # Terminate cleanly if no leads found — prevents infinite loop
+            if not state["targets"]:
+                msg = "No leads discovered via Apify. Check APIFY_TOKEN and actor availability."
+                state.setdefault("errors", []).append(msg)
+                print(f"[Scout] {msg}")
+                state["status"] = "paused"
+                return state
         else:
             if live_mode and not apify_token:
                 print("[Scout] APIFY_TOKEN not set — falling back to mock leads")
@@ -358,6 +366,11 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
         except Exception as e:
             state.setdefault("errors", []).append(f"Outreach error for {target.get('name')}: {e}")
 
+    # Clear targets after one full pass so they are not re-processed if the
+    # graph loops back through supervisor → scout again (prevents double-sends).
+    state["targets"] = []
+    # Signal supervisor to end — one outreach pass per dashboard run is enough.
+    state["status"] = "paused"
     return state
 
 

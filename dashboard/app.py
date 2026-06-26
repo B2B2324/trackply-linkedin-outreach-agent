@@ -239,10 +239,12 @@ def _display_run_result(result: dict, live: bool) -> None:
         for line in result.get("log_lines", []):
             st.text(line)
         if result.get("errors"):
-            with st.expander("Non-fatal errors"):
+            with st.expander("Non-fatal errors / warnings"):
                 for e in result["errors"]:
                     st.code(e)
         st.cache_data.clear()
+        if live:
+            st.rerun()   # refresh metrics panel immediately after live run
     else:
         st.error("Agent run failed.")
         for err in result.get("errors", []):
