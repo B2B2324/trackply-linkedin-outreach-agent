@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from src.state import OutreachState
 from src.llm import call_llm
@@ -85,65 +86,84 @@ def scout_node(state: OutreachState) -> OutreachState:
     """
     Discover and prioritise leads.
 
-    Targets are sorted so that 1st-degree and OpenLink profiles come first
-    (they never consume the connection budget), then 2nd, then 3rd.
-    In a real integration Apify would populate relationship_type/is_open_link
-    from the profile page.  The mock data below exercises all paths.
+    Live mode: calls Apify harvestapi/linkedin-profile-search.
+    Review mode / no Apify token: uses mock targets to exercise all routing paths.
+    Targets are always sorted so 1st/OpenLink come first (no budget cost).
     """
     print("[Scout] Discovering and prioritising leads...")
 
     if not state.get("targets"):
-        # Mock targets covering every relationship scenario
-        state["targets"] = [
-            {
-                "name": "Alex Rivera",
-                "profile_url": "https://www.linkedin.com/in/alex-rivera-ai",
-                "headline": "AI Evaluator @ Outlier | Open to Work | Prompt Engineering",
-                "location": "United States",
-                "about_snippet": "Freelancing on AI evaluation platforms. Looking for better tools to track gigs.",
-                "fit_score": 9.5,
-                "why_qualified": "Active AI evaluator actively looking — ideal Trackply user.",
-                "recent_activity_keywords": ["AI", "evaluation", "open to work"],
-                "relationship_type": "1st",   # already connected → DM
-                "is_open_link": False,
-            },
-            {
-                "name": "Sam Park",
-                "profile_url": "https://www.linkedin.com/in/sam-park-rlhf",
-                "headline": "RLHF Contractor | Prompt Engineer | Job Seeking",
-                "location": "Canada",
-                "about_snippet": "Doing RLHF work on multiple platforms simultaneously — hard to track.",
-                "fit_score": 8.8,
-                "why_qualified": "Multi-platform gig worker — Trackply's core use-case.",
-                "recent_activity_keywords": ["RLHF", "freelance", "job search"],
-                "relationship_type": "2nd",   # in network → connection request
-                "is_open_link": False,
-            },
-            {
-                "name": "Jordan Hale",
-                "profile_url": "https://www.linkedin.com/in/jordan-hale-open",
-                "headline": "Open to Work | AI Data Annotator",
-                "location": "United States",
-                "about_snippet": "Switched on OpenLink so anyone can message me.",
-                "fit_score": 8.2,
-                "why_qualified": "OpenLink enabled — free DM without connecting.",
-                "recent_activity_keywords": ["annotation", "open to work"],
-                "relationship_type": "3rd",
-                "is_open_link": True,          # OpenLink → DM even though 3rd degree
-            },
-            {
-                "name": "Casey Morgan",
-                "profile_url": "https://www.linkedin.com/in/casey-morgan-ml",
-                "headline": "ML Freelancer | Looking for contracts",
-                "location": "United Kingdom",
-                "about_snippet": "Hard to reach — 3rd degree, no OpenLink.",
-                "fit_score": 6.5,
-                "why_qualified": "Decent fit but hard to reach.",
-                "recent_activity_keywords": ["ML", "freelance"],
-                "relationship_type": "3rd",
-                "is_open_link": False,         # 3rd + no OpenLink → needs budget
-            },
-        ]
+        live_mode = not config.get("review_mode", True)
+        apify_token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+
+        if live_mode and apify_token:
+            try:
+                from src.apify_linkedin import search_leads
+                keywords = config.get("target_keywords", ["open to work", "ai evaluator"])
+                leads = search_leads(keywords, max_items=config.get("daily_limit", 10), apify_token=apify_token)
+                state["targets"] = leads
+                print(f"[Scout] Apify returned {len(leads)} real leads")
+            except Exception as e:
+                state.setdefault("errors", []).append(f"Apify search failed: {e}")
+                state["targets"] = []
+        else:
+            if live_mode and not apify_token:
+                print("[Scout] APIFY_TOKEN not set — falling back to mock leads")
+            # Mock targets covering every relationship scenario for review/testing
+            state["targets"] = [
+                {
+                    "name": "Alex Rivera",
+                    "profile_url": "https://www.linkedin.com/in/alex-rivera-ai",
+                    "headline": "AI Evaluator @ Outlier | Open to Work | Prompt Engineering",
+                    "location": "United States",
+                    "about_snippet": "Freelancing on AI evaluation platforms. Looking for better tools to track gigs.",
+                    "fit_score": 9.5,
+                    "why_qualified": "Active AI evaluator actively looking — ideal Trackply user.",
+                    "recent_activity_keywords": ["AI", "evaluation", "open to work"],
+                    "relationship_type": "1st",
+                    "is_open_link": False,
+                    "_linkedin_member_id": "",
+                },
+                {
+                    "name": "Sam Park",
+                    "profile_url": "https://www.linkedin.com/in/sam-park-rlhf",
+                    "headline": "RLHF Contractor | Prompt Engineer | Job Seeking",
+                    "location": "Canada",
+                    "about_snippet": "Doing RLHF work on multiple platforms simultaneously — hard to track.",
+                    "fit_score": 8.8,
+                    "why_qualified": "Multi-platform gig worker — Trackply's core use-case.",
+                    "recent_activity_keywords": ["RLHF", "freelance", "job search"],
+                    "relationship_type": "2nd",
+                    "is_open_link": False,
+                    "_linkedin_member_id": "",
+                },
+                {
+                    "name": "Jordan Hale",
+                    "profile_url": "https://www.linkedin.com/in/jordan-hale-open",
+                    "headline": "Open to Work | AI Data Annotator",
+                    "location": "United States",
+                    "about_snippet": "OpenLink enabled — free DM without connecting.",
+                    "fit_score": 8.2,
+                    "why_qualified": "OpenLink enabled — free DM without connecting.",
+                    "recent_activity_keywords": ["annotation", "open to work"],
+                    "relationship_type": "3rd",
+                    "is_open_link": True,
+                    "_linkedin_member_id": "",
+                },
+                {
+                    "name": "Casey Morgan",
+                    "profile_url": "https://www.linkedin.com/in/casey-morgan-ml",
+                    "headline": "ML Freelancer | Looking for contracts",
+                    "location": "United Kingdom",
+                    "about_snippet": "Hard to reach — 3rd degree, no OpenLink.",
+                    "fit_score": 6.5,
+                    "why_qualified": "Decent fit but hard to reach.",
+                    "recent_activity_keywords": ["ML", "freelance"],
+                    "relationship_type": "3rd",
+                    "is_open_link": False,
+                    "_linkedin_member_id": "",
+                },
+            ]
 
     # Sort by priority: 1st/OpenLink → 2nd/unknown → 3rd
     def sort_key(t: dict) -> int:
@@ -196,6 +216,34 @@ def personalizer_node(state: OutreachState) -> OutreachState:
             state.setdefault("errors", []).append(str(e))
 
     return state
+
+
+def _live_send(action: str, profile_url: str, message: str, target: dict) -> dict:
+    """
+    Actually send a connection request or DM via the LinkedIn voyager API.
+    Returns {"success": bool, "detail": str}.
+    """
+    try:
+        from src.linkedin_sender import sender_from_env
+        sender = sender_from_env()
+        if not sender:
+            return {
+                "success": False,
+                "detail": (
+                    "LinkedIn credentials not set. Add LINKEDIN_LI_AT, "
+                    "LINKEDIN_JSESSIONID, LINKEDIN_CSRF_TOKEN, and "
+                    "LINKEDIN_OWN_PROFILE_URL to Streamlit secrets."
+                ),
+            }
+        member_id = target.get("_linkedin_member_id", "")
+        if action == "connection_request":
+            return sender.send_connection_request(profile_url, note=message, member_id=member_id)
+        elif action == "dm":
+            return sender.send_dm(profile_url, message=message, member_id=member_id)
+        else:
+            return {"success": False, "detail": f"Unknown action: {action}"}
+    except Exception as e:
+        return {"success": False, "detail": str(e)}
 
 
 def outreach_decider_node(state: OutreachState) -> OutreachState:
@@ -264,20 +312,38 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
                 log_activity(
                     "linkedin", "approval_requested", profile_url, "pending",
                     metadata={"action": action, "relationship": target.get("relationship_type"),
-                              "is_open_link": target.get("is_open_link", False)},
+                              "is_open_link": target.get("is_open_link", False),
+                              "message_preview": message[:100]},
                 )
                 print(f"  [drafted] {target.get('name')} → {action} (awaiting approval)")
             else:
-                mark_lead_sent(profile_url, message)
-                log_outreach(lead_id or "unknown", action, message)
-                if action == "connection_request":
+                # Live mode — actually send via LinkedIn API
+                send_result = _live_send(action, profile_url, message, target)
+                if send_result["success"]:
+                    mark_lead_sent(profile_url, message)
+                    result_label = "success"
+                    print(f"  [sent] {target.get('name')} → {action}")
+                else:
+                    update_lead_status(profile_url, "send_failed", note=send_result.get("detail", ""))
+                    result_label = "failed"
+                    state.setdefault("errors", []).append(
+                        f"Send failed for {target.get('name')}: {send_result.get('detail')}"
+                    )
+                    print(f"  [failed] {target.get('name')} → {send_result.get('detail')}")
+
+                log_outreach(lead_id or "unknown", action, message, result_label)
+                if action == "connection_request" and send_result["success"]:
                     log_activity(
-                        "linkedin", "connection_request_sent", profile_url, "success",
+                        "linkedin", "connection_request_sent", profile_url, result_label,
                         metadata={"relationship": target.get("relationship_type")},
                     )
                     conn_used += 1
                     state["connection_requests_this_week"] = conn_used
-                print(f"  [sent] {target.get('name')} → {action}")
+                elif action == "dm":
+                    log_activity(
+                        "linkedin", "dm_sent", profile_url, result_label,
+                        metadata={"is_open_link": target.get("is_open_link", False)},
+                    )
 
             state["messages_sent_today"] = state.get("messages_sent_today", 0) + 1
 

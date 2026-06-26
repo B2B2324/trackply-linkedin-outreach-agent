@@ -97,10 +97,16 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
     if not anthropic_key:
         return {"success": False, "errors": ["ANTHROPIC_API_KEY not set in Streamlit secrets."]}
 
-    # Inject env vars so src/llm.py can pick them up
-    os.environ.setdefault("ANTHROPIC_API_KEY", anthropic_key)
+    # Inject env vars so src/ modules can pick them up
+    os.environ["ANTHROPIC_API_KEY"] = anthropic_key
     os.environ.setdefault("SUPABASE_KEY", _secret("SUPABASE_SERVICE_KEY"))
     os.environ.setdefault("SUPABASE_URL", SUPABASE_URL)
+    # LinkedIn sending credentials
+    for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID", "LINKEDIN_CSRF_TOKEN",
+              "LINKEDIN_OWN_PROFILE_URL", "APIFY_TOKEN"):
+        val = _secret(k)
+        if val:
+            os.environ[k] = val
 
     try:
         from src.nodes import build_graph
@@ -142,7 +148,14 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.header("Agent Controls")
 
-run_linkedin = st.sidebar.button("▶ Run LinkedIn Outreach (Review)")
+run_linkedin = st.sidebar.button(
+    "▶ Run LinkedIn (Review)", help="Draft messages — nothing is sent to LinkedIn"
+)
+run_linkedin_live = st.sidebar.button(
+    "🚀 Run LinkedIn LIVE",
+    type="primary",
+    help="Sends real connection requests and DMs via LinkedIn API",
+)
 st.sidebar.button("▶ Run Reddit Engagement", disabled=True)
 st.sidebar.button("▶ Run SEO Content", disabled=True)
 st.sidebar.divider()
@@ -154,21 +167,58 @@ if st.sidebar.button("🔄 Refresh now"):
 st.title("🚀 Trackply Agentic Marketing OS")
 st.caption("Live data from Trackply Supabase · auto-refreshes every 5 min · v2026-06-26")
 
-# ── Run agent if button clicked ──────────────────────────────────────────────
-if run_linkedin:
-    with st.spinner("Running LinkedIn agent in review mode…"):
-        result = run_linkedin_agent(review_mode=True)
 
+def _display_run_result(result: dict, live: bool) -> None:
     if result["success"]:
-        st.success(f"Agent finished — {result['leads_found']} lead(s) processed.")
+        mode = "LIVE" if live else "review"
+        st.success(f"[{mode}] Agent finished — {result['leads_found']} lead(s) processed.")
         for line in result.get("log_lines", []):
             st.text(line)
-        # Bust cache so tables reflect new rows immediately
+        if result.get("errors"):
+            with st.expander("Non-fatal errors"):
+                for e in result["errors"]:
+                    st.code(e)
         st.cache_data.clear()
     else:
         st.error("Agent run failed.")
         for err in result.get("errors", []):
             st.code(err)
+
+
+# ── Run agent if button clicked ──────────────────────────────────────────────
+if run_linkedin:
+    with st.spinner("Running LinkedIn agent in review mode…"):
+        result = run_linkedin_agent(review_mode=True)
+    _display_run_result(result, live=False)
+
+if run_linkedin_live:
+    # Verify LinkedIn credentials are present before starting
+    missing = [
+        k for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID", "LINKEDIN_CSRF_TOKEN",
+                    "LINKEDIN_OWN_PROFILE_URL")
+        if not _secret(k)
+    ]
+    if missing:
+        st.error(
+            f"Missing Streamlit secrets: {', '.join(missing)}\n\n"
+            "Go to your Streamlit Cloud app → Settings → Secrets and add:\n"
+            "```\n"
+            "LINKEDIN_LI_AT = \"your li_at cookie value\"\n"
+            "LINKEDIN_JSESSIONID = \"your JSESSIONID value\"\n"
+            "LINKEDIN_CSRF_TOKEN = \"your csrf-token value\"\n"
+            "LINKEDIN_OWN_PROFILE_URL = \"https://www.linkedin.com/in/your-name\"\n"
+            "APIFY_TOKEN = \"your apify token\"  # for real lead discovery\n"
+            "```\n"
+            "Get cookie values from Chrome DevTools → Application → Cookies → www.linkedin.com"
+        )
+    else:
+        st.warning(
+            "**LIVE MODE** — this will send real LinkedIn messages. "
+            "Make sure your weekly connection budget isn't exhausted."
+        )
+        with st.spinner("Running LinkedIn agent in LIVE mode…"):
+            result = run_linkedin_agent(review_mode=False)
+        _display_run_result(result, live=True)
 
 # ── Load data ────────────────────────────────────────────────────────────────
 with st.spinner("Loading…"):
