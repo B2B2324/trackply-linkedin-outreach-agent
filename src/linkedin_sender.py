@@ -235,90 +235,64 @@ class LinkedInSender:
         """
         results: list[dict] = []
         start = 0
-        batch = 50
+        batch = 40
 
         while len(results) < limit:
-            params: dict = {
-                "q":     "search",
-                "start": start,
-                "count": min(batch, limit - len(results)),
-                "network": "F",    # F = 1st degree
-            }
-            if keywords:
-                params["keywords"] = keywords
+            count = min(batch, limit - len(results))
+            # Try two endpoints in order — both return 1st-degree connections
+            endpoints = [
+                # Endpoint 1: classic connections list (most reliable)
+                (f"{_BASE}/relationships/connectionsList", {
+                    "start": start, "count": count,
+                    "sortType": "RECENTLY_ADDED",
+                }),
+                # Endpoint 2: older connections endpoint
+                (f"{_BASE}/relationships/connections", {
+                    "q": "viewer", "start": start, "count": count,
+                    "sortType": "RECENTLY_ADDED",
+                }),
+            ]
 
-            try:
-                r = self.session.get(
-                    f"{_BASE}/search/dash/clusters",
-                    params={
-                        "decorationId": "com.linkedin.voyager.dash.deco.search.SearchClusterCollection-175",
-                        "origin":       "GLOBAL_SEARCH_HEADER",
-                        "q":            "all",
-                        "query":        f"(keywords:{keywords or ''},filters:List((filter:network,values:List((value:F,selectionType:INCLUDED)))))",
-                        "start":        start,
-                        "count":        min(batch, limit - len(results)),
-                    },
-                    timeout=_TIMEOUT,
-                )
-            except Exception as e:
-                print(f"[LinkedInSender] get_my_connections search failed: {e}")
+            data = None
+            for url, params in endpoints:
+                try:
+                    r = self.session.get(url, params=params, timeout=_TIMEOUT)
+                    print(f"[LinkedInSender] {url.split('/')[-1]} → HTTP {r.status_code}")
+                    if r.ok:
+                        data = r.json()
+                        break
+                except Exception as e:
+                    print(f"[LinkedInSender] endpoint failed: {e}")
+
+            if not data:
+                print("[LinkedInSender] All connection endpoints failed — no connections returned")
                 break
 
-            if not r.ok:
-                # Fallback: try the simpler connections endpoint
-                try:
-                    r2 = self.session.get(
-                        f"{_BASE}/relationships/connections",
-                        params={"q": "search", "start": start,
-                                "count": min(batch, limit - len(results))},
-                        timeout=_TIMEOUT,
-                    )
-                    if not r2.ok:
-                        print(f"[LinkedInSender] connections endpoint returned {r2.status_code}")
-                        break
-                    data = r2.json()
-                    elements = data.get("elements", [])
-                except Exception as e:
-                    print(f"[LinkedInSender] connections fallback failed: {e}")
-                    break
-            else:
-                try:
-                    data = r.json()
-                    # Flatten search cluster results
-                    elements = []
-                    for cluster in data.get("elements", []):
-                        for item in cluster.get("items", []):
-                            p = item.get("item", {}).get("entityResult") or item.get("item", {})
-                            if p:
-                                elements.append(p)
-                except Exception:
-                    break
-
+            elements = data.get("elements", [])
+            print(f"[LinkedInSender] page start={start}: {len(elements)} elements")
             if not elements:
                 break
 
             for el in elements:
-                # Handle both search result shape and connections shape
                 mini = (
                     el.get("miniProfile")
-                    or el.get("*miniProfile")
-                    or el
+                    or el.get("connectedMember", {}).get("miniProfile")
+                    or {}
                 )
-                fn   = mini.get("firstName", "")
-                ln   = mini.get("lastName", "")
-                name = f"{fn} {ln}".strip() or mini.get("fullName", "")
-                pid  = mini.get("publicIdentifier") or mini.get("vanityName", "")
+                fn  = mini.get("firstName", "")
+                ln  = mini.get("lastName", "")
+                name = f"{fn} {ln}".strip()
+                pid  = mini.get("publicIdentifier", "")
                 if not pid or not name:
                     continue
                 profile_url = f"https://www.linkedin.com/in/{pid}"
-                headline    = mini.get("occupation") or el.get("headline", {}).get("text", "")
-                location    = (el.get("subline") or {}).get("text", "")
+                headline    = mini.get("occupation", "")
                 member_id   = str(mini.get("objectUrn", "")).split(":")[-1]
                 results.append({
                     "name":                     name,
                     "profile_url":              profile_url,
                     "headline":                 headline,
-                    "location":                 location,
+                    "location":                 el.get("geoRegion", ""),
                     "about_snippet":            "",
                     "fit_score":                7.0,
                     "why_qualified":            "1st-degree LinkedIn connection — can DM directly",
@@ -331,7 +305,7 @@ class LinkedInSender:
                     break
 
             if len(elements) < batch:
-                break   # no more pages
+                break
             start += batch
 
         print(f"[LinkedInSender] get_my_connections → {len(results)} connections fetched")
