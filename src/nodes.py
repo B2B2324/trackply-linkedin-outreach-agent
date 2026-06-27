@@ -102,23 +102,15 @@ def scout_node(state: OutreachState) -> OutreachState:
 
         if live_mode:
             if budget_gone:
-                # No connection budget — skip Apify (it returns "unknown" degree which all get skipped).
-                # Instead fetch actual 1st-degree connections via the user's LinkedIn cookies.
-                print("[Scout] Connection budget exhausted — fetching 1st-degree connections to DM directly.")
+                # No connection budget — skip Apify search; fetch 1st-degree connections via
+                # Apify residential proxy (voyager API is blocked from Railway datacenter IPs).
+                print("[Scout] Connection budget exhausted — fetching 1st-degree connections via Apify proxy.")
                 try:
-                    from src.linkedin_sender import sender_from_env
-                    sender = sender_from_env()
-                    if sender:
-                        leads = sender.get_my_connections(limit=config.get("daily_limit", 80))
-                        state["targets"] = leads
-                        state["_leads_discovered"] = len(leads)
-                        print(f"[Scout] Fetched {len(leads)} 1st-degree connections to DM")
-                    else:
-                        state["targets"] = []
-                        state.setdefault("errors", []).append(
-                            "LinkedIn credentials missing — cannot fetch connections. "
-                            "Set LINKEDIN_LI_AT, LINKEDIN_JSESSIONID, LINKEDIN_CSRF_TOKEN in Streamlit secrets."
-                        )
+                    from src.apify_linkedin import fetch_connections_via_apify
+                    leads = fetch_connections_via_apify(limit=config.get("daily_limit", 80), apify_token=apify_token)
+                    state["targets"] = leads
+                    state["_leads_discovered"] = len(leads)
+                    print(f"[Scout] Fetched {len(leads)} 1st-degree connections via Apify")
                 except Exception as e:
                     state.setdefault("errors", []).append(f"Connections fetch failed: {e}")
                     state["targets"] = []
@@ -140,17 +132,16 @@ def scout_node(state: OutreachState) -> OutreachState:
                     state["targets"] = []
 
                 if not state["targets"]:
-                    # Apify returned 0 — try fetching own connections as fallback
-                    print("[Scout] Apify returned 0 leads — trying 1st-degree connections as fallback.")
+                    # Apify search returned 0 — fall back to fetching own connections via Apify proxy
+                    print("[Scout] Apify returned 0 leads — fetching 1st-degree connections via Apify proxy.")
                     try:
-                        from src.linkedin_sender import sender_from_env
-                        sender = sender_from_env()
-                        if sender:
-                            leads = sender.get_my_connections(limit=config.get("daily_limit", 80))
+                        from src.apify_linkedin import fetch_connections_via_apify
+                        leads = fetch_connections_via_apify(limit=config.get("daily_limit", 80), apify_token=apify_token)
+                        if leads:
                             state["targets"] = leads
                             state["_leads_discovered"] = len(leads)
                             state.setdefault("errors", []).append(
-                                "Apify returned 0 results — fell back to 1st-degree connections."
+                                "Apify search returned 0 — fell back to 1st-degree connections."
                             )
                     except Exception as e2:
                         state.setdefault("errors", []).append(f"Connection fallback also failed: {e2}")

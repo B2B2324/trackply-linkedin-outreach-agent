@@ -77,18 +77,85 @@ def _run_single_search(client: ApifyClient, query: str, max_items: int) -> list[
     run_input = {
         "searchQuery": query,
         "maxItems":    max_items,
-        # No connectionDegree filter — Apify uses its own session so it can't
-        # know YOUR connection degree. We map degree after the fact.
     }
     print(f"[Apify] Query: {query!r} (max {max_items})")
     try:
-        run = client.actor(SEARCH_ACTOR).call(run_input=run_input, timeout_secs=300)
-        if not run or not run.get("defaultDatasetId"):
+        actor = client.actor(SEARCH_ACTOR)
+        # Use start() + wait_for_finish() — compatible across all apify-client versions
+        run_info = actor.start(run_input=run_input)
+        run_id = run_info.get("id") or run_info.get("actorRunId")
+        if not run_id:
+            print(f"[Apify] Failed to start run for: {query!r}")
+            return []
+        finished = client.run(run_id).wait_for_finish(wait_secs=300)
+        dataset_id = finished.get("defaultDatasetId") if finished else None
+        if not dataset_id:
             print(f"[Apify] No dataset for query: {query!r}")
             return []
-        return list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        return list(client.dataset(dataset_id).iterate_items())
     except Exception as e:
         print(f"[Apify] Query failed ({query!r}): {e}")
+        return []
+
+
+CONNECTIONS_ACTOR = "scrapeflow/linkedin-network-scraper"
+
+
+def fetch_connections_via_apify(limit: int = 200, apify_token: str | None = None) -> list[dict]:
+    """
+    Fetch the user's 1st-degree LinkedIn connections via Apify's network scraper.
+    Uses Apify's residential proxies — works from Railway (voyager API is blocked there).
+    Only needs LINKEDIN_LI_AT.
+    """
+    token = apify_token or os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+    li_at = os.environ.get("LINKEDIN_LI_AT") or os.environ.get("li_at", "")
+
+    if not token or not li_at:
+        print("[Apify] fetch_connections_via_apify: missing APIFY_TOKEN or LINKEDIN_LI_AT")
+        return []
+
+    client = ApifyClient(token)
+    run_input = {
+        "liAtCookie": li_at,
+    }
+    print(f"[Apify] Fetching up to {limit} connections via residential proxy...")
+    try:
+        run_info = client.actor(CONNECTIONS_ACTOR).start(run_input=run_input)
+        run_id = run_info.get("id") or run_info.get("actorRunId")
+        if not run_id:
+            print("[Apify] fetch_connections: failed to start run")
+            return []
+        finished = client.run(run_id).wait_for_finish(wait_secs=300)
+        dataset_id = finished.get("defaultDatasetId") if finished else None
+        if not dataset_id:
+            print("[Apify] fetch_connections: no dataset returned")
+            return []
+        raw = list(client.dataset(dataset_id).iterate_items())
+        print(f"[Apify] fetch_connections: {len(raw)} raw items")
+
+        leads = []
+        for item in raw:
+            name = item.get("fullName") or f"{item.get('firstName','')} {item.get('lastName','')}".strip()
+            pid = item.get("publicIdentifier") or item.get("vanityName") or ""
+            if not name or not pid:
+                continue
+            leads.append({
+                "name": name,
+                "profile_url": f"https://www.linkedin.com/in/{pid}",
+                "headline": item.get("headline") or item.get("occupation") or "",
+                "location": item.get("location") or item.get("geoLocationName") or "",
+                "about_snippet": "",
+                "fit_score": 7.0,
+                "why_qualified": "1st-degree LinkedIn connection — can DM directly",
+                "recent_activity_keywords": [],
+                "relationship_type": "1st",
+                "is_open_link": False,
+                "_linkedin_member_id": str(item.get("memberId") or ""),
+            })
+        print(f"[Apify] fetch_connections: {len(leads)} normalised leads")
+        return leads
+    except Exception as e:
+        print(f"[Apify] fetch_connections error: {e}")
         return []
 
 
