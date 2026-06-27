@@ -126,6 +126,8 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
             ], "log_lines": []}
 
     try:
+        import io, sys
+        stdout_capture = io.StringIO()
         from src.nodes import build_graph
         from src.campaign_config import load_campaign_config, default_config as config
         config["require_human_approval"] = review_mode
@@ -141,22 +143,32 @@ def run_linkedin_agent(review_mode: bool = True) -> dict:
         }
 
         graph = build_graph()
-        final_state = graph.invoke(initial_state)
+        old_stdout = sys.stdout
+        sys.stdout = stdout_capture
+        try:
+            final_state = graph.invoke(initial_state)
+        finally:
+            sys.stdout = old_stdout
+
+        agent_log = stdout_capture.getvalue()
+        if agent_log:
+            log_lines.extend(agent_log.strip().splitlines())
 
         leads_found = final_state.get("_leads_discovered", 0)
         errors      = final_state.get("errors", [])
         conn_used   = final_state.get("connection_requests_this_week", 0)
         send_log    = final_state.get("_send_log", [])
 
+        log_lines.append("─" * 40)
         log_lines.append(f"Leads discovered: {leads_found}")
-        log_lines.append(f"Connection requests used this week: {conn_used}/{config.get('weekly_connection_limit', 20)}")
+        log_lines.append(f"Connection requests used this week: {conn_used}/{config.get('weekly_connection_limit', 80)}")
         if review_mode:
             log_lines.append("Review mode — messages drafted, NOT sent.")
         for entry in send_log:
             ol  = " [OpenLink]" if entry.get("ol") else ""
             log_lines.append(f"  • {entry['name']} ({entry['rel']}{ol}) → {entry['action']} [{entry['result']}]")
         if not send_log and not errors:
-            log_lines.append("No leads were processed. Check errors below.")
+            log_lines.append("No leads processed — see agent log above for details.")
         return {"success": True, "leads_found": leads_found, "errors": errors, "log_lines": log_lines}
 
     except Exception:
