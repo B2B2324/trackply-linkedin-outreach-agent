@@ -38,7 +38,7 @@ def _build_llm():
         if not key:
             raise RuntimeError("ANTHROPIC_API_KEY not set — add it to Streamlit secrets")
         return ChatAnthropic(
-            model="claude-3-5-sonnet-20241022",
+            model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             temperature=0.7,
             api_key=key,
         )

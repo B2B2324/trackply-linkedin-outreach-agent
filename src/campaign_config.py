@@ -19,7 +19,7 @@ default_config: CampaignConfig = {
     "require_human_approval": True,
     "target_keywords": ["open to work", "ai evaluator", "prompt engineer", "rlhf", "freelance ai", "job seeker"],
     "excluded_locations": [],
-    "llm_model": "claude-3-5-sonnet-20241022",
+    "llm_model": "claude-sonnet-4-6",
     "review_mode": True,
 }
 
