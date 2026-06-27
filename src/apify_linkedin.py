@@ -82,7 +82,7 @@ def _run_single_search(client: ApifyClient, query: str, max_items: int) -> list[
     }
     print(f"[Apify] Query: {query!r} (max {max_items})")
     try:
-        run = client.actor(SEARCH_ACTOR).call(run_input=run_input, wait_secs=90)
+        run = client.actor(SEARCH_ACTOR).call(run_input=run_input, wait_secs=300)
         if not run or not run.get("defaultDatasetId"):
             print(f"[Apify] No dataset for query: {query!r}")
             return []

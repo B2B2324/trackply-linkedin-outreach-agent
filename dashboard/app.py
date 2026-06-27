@@ -265,8 +265,6 @@ def _display_run_result(result: dict, live: bool) -> None:
             for e in result["errors"]:
                 st.code(e)
         st.cache_data.clear()
-        if live:
-            st.rerun()
     else:
         st.error("Agent run failed.")
         for err in result.get("errors", []):
