@@ -319,10 +319,10 @@ def sender_from_env() -> LinkedInSender | None:
     Build a LinkedInSender from environment variables / Streamlit secrets.
     Returns None if required credentials are missing.
     """
-    li_at = os.environ.get("LINKEDIN_LI_AT", "")
-    jsessionid = os.environ.get("LINKEDIN_JSESSIONID", "")
-    csrf_token = os.environ.get("LINKEDIN_CSRF_TOKEN", "")
-    own_url = os.environ.get("LINKEDIN_OWN_PROFILE_URL", "")
+    li_at = os.environ.get("LINKEDIN_LI_AT") or os.environ.get("li_at", "")
+    jsessionid = os.environ.get("LINKEDIN_JSESSIONID") or os.environ.get("JSESSIONID", "")
+    csrf_token = os.environ.get("LINKEDIN_CSRF_TOKEN") or os.environ.get("csrf-token", "")
+    own_url = os.environ.get("LINKEDIN_OWN_PROFILE_URL") or os.environ.get("OWN_PROFILE_URL", "")
 
     if not all([li_at, jsessionid, csrf_token, own_url]):
         return None
