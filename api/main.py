@@ -119,6 +119,17 @@ def health():
     return {"ok": True}
 
 
+@app.post("/runs/{run_id}/stop")
+def stop_run(run_id: str):
+    run = _runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="run not found")
+    run["status"] = "failed"
+    run["completed_at"] = datetime.now(timezone.utc).isoformat()
+    run["log"].append("✗ Run stopped by user.")
+    return {"ok": True}
+
+
 @app.post("/run")
 def start_run(body: RunRequest):
     run_id = uuid.uuid4().hex[:8]

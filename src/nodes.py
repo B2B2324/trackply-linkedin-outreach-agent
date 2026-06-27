@@ -485,10 +485,13 @@ def build_graph():
     def route_after_supervisor(state: OutreachState):
         return END if state.get("status") == "paused" else "scout"
 
+    def route_after_scout(state: OutreachState):
+        return END if state.get("status") == "paused" else "personalizer"
+
     workflow.add_conditional_edges("supervisor", route_after_supervisor)
-    workflow.add_edge("scout",            "personalizer")
+    workflow.add_conditional_edges("scout",      route_after_scout)
     workflow.add_edge("personalizer",     "outreach_decider")
     workflow.add_edge("outreach_decider", "conversational")
-    workflow.add_edge("conversational",   "supervisor")
+    workflow.add_edge("conversational",   END)
 
     return workflow.compile()
