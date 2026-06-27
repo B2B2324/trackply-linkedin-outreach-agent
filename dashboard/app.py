@@ -225,6 +225,22 @@ run_reddit = st.sidebar.button("▶ Run Reddit Engagement", help="Find Reddit th
 run_reddit_live = st.sidebar.button("🚀 Run Reddit LIVE", type="primary", help="Actually post Kemba comments to Reddit")
 st.sidebar.button("▶ Run SEO Content", disabled=True)
 st.sidebar.divider()
+
+# Pre-flight status
+with st.sidebar.expander("⚙️ Config status", expanded=True):
+    for key, label in [
+        ("LINKEDIN_LI_AT",          "li_at cookie"),
+        ("LINKEDIN_JSESSIONID",     "JSESSIONID"),
+        ("LINKEDIN_CSRF_TOKEN",     "CSRF token"),
+        ("LINKEDIN_OWN_PROFILE_URL","Own profile URL"),
+        ("APIFY_TOKEN",             "Apify token"),
+        ("ANTHROPIC_API_KEY",       "Anthropic key"),
+    ]:
+        val = _secret(key)
+        icon = "✅" if val else "❌"
+        preview = (val[:6] + "…") if val else "MISSING"
+        st.caption(f"{icon} {label}: `{preview}`")
+
 if st.sidebar.button("🔄 Refresh now"):
     st.cache_data.clear()
     st.rerun()
@@ -237,16 +253,20 @@ st.caption("Live data from Trackply Supabase · auto-refreshes every 5 min · v2
 def _display_run_result(result: dict, live: bool) -> None:
     if result["success"]:
         mode = "LIVE" if live else "review"
-        st.success(f"[{mode}] Agent finished — {result['leads_found']} lead(s) processed.")
+        leads = result.get('leads_found', 0)
+        if leads == 0:
+            st.warning(f"[{mode}] Agent finished — **0 leads processed**. See details below.")
+        else:
+            st.success(f"[{mode}] Agent finished — {leads} lead(s) processed.")
         for line in result.get("log_lines", []):
             st.text(line)
         if result.get("errors"):
-            with st.expander("Non-fatal errors / warnings"):
-                for e in result["errors"]:
-                    st.code(e)
+            st.error("**Errors / warnings (expand to debug):**")
+            for e in result["errors"]:
+                st.code(e)
         st.cache_data.clear()
         if live:
-            st.rerun()   # refresh metrics panel immediately after live run
+            st.rerun()
     else:
         st.error("Agent run failed.")
         for err in result.get("errors", []):
