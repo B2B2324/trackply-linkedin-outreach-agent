@@ -113,10 +113,16 @@ def _run_single_search(client: ApifyClient, query: str, max_items: int) -> list[
         # .call() blocks until the run finishes. Pass NO timeout kwarg (this
         # client version rejects both wait_secs and timeout_secs).
         run = actor.call(run_input=run_input)
+        status = _run_field(run, "status")
+        run_id = _run_field(run, "id")
+        print(f"[Apify] search run status={status} id={run_id}")
+        if status and status != "SUCCEEDED":
+            # FAILED / ABORTED / TIMED-OUT — the run did not complete normally.
+            msg = _run_field(run, "statusMessage") or _run_field(run, "status_message")
+            print(f"[Apify] search run did NOT succeed ({status}): {msg}")
         dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         if not dataset_id:
-            print(f"[Apify] No dataset for query: {query!r} "
-                  f"(run type={type(run).__name__}, attrs={[a for a in dir(run) if 'dataset' in a.lower()]})")
+            print(f"[Apify] No dataset for query: {query!r} (run type={type(run).__name__})")
             return []
         return list(client.dataset(dataset_id).iterate_items())
     except Exception as e:
@@ -147,6 +153,12 @@ def fetch_connections_via_apify(limit: int = 200, apify_token: str | None = None
     print(f"[Apify] Fetching up to {limit} connections via residential proxy...")
     try:
         run = client.actor(CONNECTIONS_ACTOR).call(run_input=run_input)
+        status = _run_field(run, "status")
+        run_id = _run_field(run, "id")
+        print(f"[Apify] connections run status={status} id={run_id}")
+        if status and status != "SUCCEEDED":
+            msg = _run_field(run, "statusMessage") or _run_field(run, "status_message")
+            print(f"[Apify] connections run did NOT succeed ({status}): {msg}")
         dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         if not dataset_id:
             print("[Apify] fetch_connections: no dataset returned")
