@@ -211,6 +211,8 @@ def _display_reddit_result(result: dict, live: bool) -> None:
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.header("Agent Controls")
 
+test_creds = st.sidebar.button("🔑 Test LinkedIn Credentials", help="Verify cookies are still valid before running")
+
 run_linkedin = st.sidebar.button(
     "▶ Run LinkedIn (Review)", help="Draft messages — nothing is sent to LinkedIn"
 )
@@ -250,6 +252,48 @@ def _display_run_result(result: dict, live: bool) -> None:
         for err in result.get("errors", []):
             st.code(err)
 
+
+# ── Test credentials ─────────────────────────────────────────────────────────
+if test_creds:
+    for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID", "LINKEDIN_CSRF_TOKEN", "LINKEDIN_OWN_PROFILE_URL"):
+        val = _secret(k)
+        if val:
+            os.environ[k] = val
+
+    missing = [k for k in ("LINKEDIN_LI_AT", "LINKEDIN_JSESSIONID", "LINKEDIN_CSRF_TOKEN", "LINKEDIN_OWN_PROFILE_URL") if not _secret(k)]
+    if missing:
+        st.error(f"Missing secrets: {', '.join(missing)}\n\nAdd them in Streamlit Cloud → Settings → Secrets.")
+    else:
+        with st.spinner("Testing LinkedIn cookies…"):
+            try:
+                from src.linkedin_sender import sender_from_env
+                import requests
+                sender = sender_from_env()
+                if not sender:
+                    st.error("Could not build LinkedIn session — check secrets.")
+                else:
+                    r = sender.session.get(
+                        "https://www.linkedin.com/voyager/api/me",
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        name = (data.get("miniProfile") or {}).get("firstName", "") or "unknown"
+                        st.success(f"✅ Cookies valid! LinkedIn recognizes you as: {name}")
+                    elif r.status_code in (401, 403):
+                        st.error(
+                            f"❌ Cookies EXPIRED (HTTP {r.status_code}). "
+                            "You need to refresh your LinkedIn cookies in Streamlit secrets.\n\n"
+                            "**How to get fresh cookies:**\n"
+                            "1. Log into LinkedIn in Chrome\n"
+                            "2. Open DevTools → Application → Cookies → www.linkedin.com\n"
+                            "3. Copy: `li_at`, `JSESSIONID` (strip outer quotes), `csrf-token`\n"
+                            "4. Paste into Streamlit Cloud → Settings → Secrets"
+                        )
+                    else:
+                        st.warning(f"Unexpected response: HTTP {r.status_code} — cookies may be stale.")
+            except Exception as e:
+                st.error(f"Test failed: {e}")
 
 # ── Run agent if button clicked ──────────────────────────────────────────────
 if run_linkedin:
