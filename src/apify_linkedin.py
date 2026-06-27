@@ -132,17 +132,44 @@ def fetch_connections_via_apify(limit: int = 200, apify_token: str | None = None
             return []
         raw = list(client.dataset(dataset_id).iterate_items())
         print(f"[Apify] fetch_connections: {len(raw)} raw items")
+        if raw:
+            # Log the keys of the first item once so we can see the real schema in Railway logs
+            print(f"[Apify] fetch_connections: sample item keys = {list(raw[0].keys())}")
 
         leads = []
         for item in raw:
-            name = item.get("fullName") or f"{item.get('firstName','')} {item.get('lastName','')}".strip()
-            pid = item.get("publicIdentifier") or item.get("vanityName") or ""
-            if not name or not pid:
+            # Defensive: this actor's exact field names aren't published, so try every
+            # plausible variant for name / profile url / headline.
+            name = (
+                item.get("fullName")
+                or item.get("name")
+                or f"{item.get('firstName','')} {item.get('lastName','')}".strip()
+            )
+            profile_url = (
+                item.get("profileUrl")
+                or item.get("publicProfileUrl")
+                or item.get("profile_url")
+                or item.get("url")
+                or item.get("vanityUrl")
+                or item.get("linkedinUrl")
+            )
+            # Fall back to building a URL from a public identifier if no full URL present
+            if not profile_url:
+                pid = (
+                    item.get("publicIdentifier")
+                    or item.get("vanityName")
+                    or item.get("publicId")
+                    or item.get("username")
+                )
+                if pid:
+                    profile_url = f"https://www.linkedin.com/in/{pid}"
+
+            if not name or not profile_url or "/in/" not in profile_url:
                 continue
             leads.append({
                 "name": name,
-                "profile_url": f"https://www.linkedin.com/in/{pid}",
-                "headline": item.get("headline") or item.get("occupation") or "",
+                "profile_url": profile_url.split("?")[0],
+                "headline": item.get("headline") or item.get("occupation") or item.get("title") or "",
                 "location": item.get("location") or item.get("geoLocationName") or "",
                 "about_snippet": "",
                 "fit_score": 7.0,
@@ -150,10 +177,10 @@ def fetch_connections_via_apify(limit: int = 200, apify_token: str | None = None
                 "recent_activity_keywords": [],
                 "relationship_type": "1st",
                 "is_open_link": False,
-                "_linkedin_member_id": str(item.get("memberId") or ""),
+                "_linkedin_member_id": str(item.get("memberId") or item.get("entityUrn") or ""),
             })
         print(f"[Apify] fetch_connections: {len(leads)} normalised leads")
-        return leads
+        return leads[:limit]
     except Exception as e:
         print(f"[Apify] fetch_connections error: {e}")
         return []
