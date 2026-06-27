@@ -233,14 +233,16 @@ def scout_node(state: OutreachState) -> OutreachState:
 
     state["targets"] = sorted(state["targets"], key=sort_key)
 
-    for t in state["targets"]:
-        try:
-            lead = log_lead({**t, "relationship_type": t.get("relationship_type", "unknown"),
-                             "is_open_link": t.get("is_open_link", False)})
-            if lead:
-                state.setdefault("supabase_lead_ids", {})[t["profile_url"]] = lead.get("id")
-        except Exception as e:
-            state.setdefault("errors", []).append(f"Scout log error: {e}")
+    # Only log real leads to Supabase — skip in review mode (mock data)
+    if not config.get("review_mode", True):
+        for t in state["targets"]:
+            try:
+                lead = log_lead({**t, "relationship_type": t.get("relationship_type", "unknown"),
+                                 "is_open_link": t.get("is_open_link", False)})
+                if lead:
+                    state.setdefault("supabase_lead_ids", {})[t["profile_url"]] = lead.get("id")
+            except Exception as e:
+                state.setdefault("errors", []).append(f"Scout log error: {e}")
 
     print(f"[Scout] {len(state['targets'])} leads queued (sorted by reachability)")
     return state
