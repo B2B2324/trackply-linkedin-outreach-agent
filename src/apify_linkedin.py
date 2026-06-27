@@ -10,6 +10,35 @@ from apify_client import ApifyClient
 
 SEARCH_ACTOR = "harvestapi/linkedin-profile-search"
 
+
+def _run_field(run, *keys):
+    """
+    Extract a field from an Apify run result that may be a plain dict OR a typed
+    object, in either camelCase or snake_case. Returns the first match found.
+    The installed apify-client version returns typed `Run` objects (no .get()),
+    so we can't assume dict access.
+    """
+    if run is None:
+        return None
+    for key in keys:
+        if isinstance(run, dict):
+            if key in run:
+                return run[key]
+        elif hasattr(run, key):
+            return getattr(run, key)
+    # Last resort: some typed objects expose a dict via these methods
+    for conv in ("to_dict", "model_dump", "dict"):
+        fn = getattr(run, conv, None)
+        if callable(fn):
+            try:
+                d = fn()
+                for key in keys:
+                    if isinstance(d, dict) and key in d:
+                        return d[key]
+            except Exception:
+                pass
+    return None
+
 # Multiple focused queries run in parallel — each targets a different persona
 # so results are complementary rather than overlapping.
 KEYWORD_GROUPS = [
@@ -81,16 +110,13 @@ def _run_single_search(client: ApifyClient, query: str, max_items: int) -> list[
     print(f"[Apify] Query: {query!r} (max {max_items})")
     try:
         actor = client.actor(SEARCH_ACTOR)
-        # Use start() + wait_for_finish() — compatible across all apify-client versions
-        run_info = actor.start(run_input=run_input)
-        run_id = run_info.get("id") or run_info.get("actorRunId")
-        if not run_id:
-            print(f"[Apify] Failed to start run for: {query!r}")
-            return []
-        finished = client.run(run_id).wait_for_finish(wait_secs=300)
-        dataset_id = finished.get("defaultDatasetId") if finished else None
+        # .call() blocks until the run finishes. Pass NO timeout kwarg (this
+        # client version rejects both wait_secs and timeout_secs).
+        run = actor.call(run_input=run_input)
+        dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         if not dataset_id:
-            print(f"[Apify] No dataset for query: {query!r}")
+            print(f"[Apify] No dataset for query: {query!r} "
+                  f"(run type={type(run).__name__}, attrs={[a for a in dir(run) if 'dataset' in a.lower()]})")
             return []
         return list(client.dataset(dataset_id).iterate_items())
     except Exception as e:
@@ -120,13 +146,8 @@ def fetch_connections_via_apify(limit: int = 200, apify_token: str | None = None
     }
     print(f"[Apify] Fetching up to {limit} connections via residential proxy...")
     try:
-        run_info = client.actor(CONNECTIONS_ACTOR).start(run_input=run_input)
-        run_id = run_info.get("id") or run_info.get("actorRunId")
-        if not run_id:
-            print("[Apify] fetch_connections: failed to start run")
-            return []
-        finished = client.run(run_id).wait_for_finish(wait_secs=300)
-        dataset_id = finished.get("defaultDatasetId") if finished else None
+        run = client.actor(CONNECTIONS_ACTOR).call(run_input=run_input)
+        dataset_id = _run_field(run, "defaultDatasetId", "default_dataset_id")
         if not dataset_id:
             print("[Apify] fetch_connections: no dataset returned")
             return []
