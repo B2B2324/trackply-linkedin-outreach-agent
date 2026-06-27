@@ -51,11 +51,16 @@ KEYWORD_GROUPS = [
 
 
 def _normalise(item: dict, query: str) -> dict | None:
-    """Convert a raw Apify item into a lead dict. Returns None if unusable."""
+    """Convert a raw Apify item into a lead dict. Returns None if unusable.
+
+    Field names match harvestapi/linkedin-profile-search output (verified):
+      linkedinUrl, firstName, lastName, summary, openProfile, premium,
+      location.linkedinText, currentPositions[].title/companyName, id
+    """
     profile_url = (
-        item.get("profileUrl")
+        item.get("linkedinUrl")
+        or item.get("profileUrl")
         or item.get("url")
-        or item.get("linkedinUrl")
         or (f"https://www.linkedin.com/in/{item.get('publicIdentifier')}"
             if item.get("publicIdentifier") else None)
     )
@@ -68,10 +73,20 @@ def _normalise(item: dict, query: str) -> dict | None:
     if not name:
         return None
 
+    # Headline: search actor doesn't return one — synthesise from current position
     headline = item.get("headline") or ""
-    about    = item.get("about") or item.get("summary") or ""
-    ai_kws   = ["ai", "prompt", "rlhf", "evaluator", "annotation", "freelance", "gig"]
-    hits     = sum(1 for kw in ai_kws if kw in headline.lower() or kw in about.lower())
+    positions = item.get("currentPositions") or []
+    if not headline and positions:
+        p0 = positions[0]
+        title = (p0.get("title") or "").strip()
+        company = (p0.get("companyName") or "").strip()
+        headline = " at ".join(x for x in (title, company) if x)
+
+    about    = item.get("summary") or item.get("about") or ""
+    ai_kws   = ["ai", "prompt", "rlhf", "evaluator", "annotation",
+                "freelance", "gig", "open to work", "machine learning"]
+    text     = f"{headline} {about}".lower()
+    hits     = sum(1 for kw in ai_kws if kw in text)
     fit_score = min(10.0, 6.0 + hits * 0.5)
 
     degree = item.get("connectionDegree") or item.get("distance") or ""
@@ -84,20 +99,30 @@ def _normalise(item: dict, query: str) -> dict | None:
     else:
         rel = "unknown"
 
-    is_open_link = bool(item.get("openLink") or item.get("isOpenLink"))
+    # openProfile members can be DM'd without spending a connection request
+    is_open_link = bool(
+        item.get("openProfile") or item.get("openLink") or item.get("isOpenLink")
+    )
+
+    # Location may be nested ({"linkedinText": "Brazil"}) or a plain string
+    loc = item.get("location")
+    if isinstance(loc, dict):
+        location = loc.get("linkedinText") or loc.get("text") or ""
+    else:
+        location = loc or item.get("geoLocationName") or ""
 
     return {
         "name":                     name,
-        "profile_url":              profile_url,
+        "profile_url":              profile_url.split("?")[0],
         "headline":                 headline,
-        "location":                 item.get("location") or item.get("geoLocationName") or "",
+        "location":                 location,
         "about_snippet":            about[:300],
         "fit_score":                round(fit_score, 1),
         "why_qualified":            f"Found via LinkedIn search: {query}",
         "recent_activity_keywords": ai_kws[:3],
         "relationship_type":        rel,
         "is_open_link":             is_open_link,
-        "_linkedin_member_id":      str(item.get("memberId") or item.get("profileId") or ""),
+        "_linkedin_member_id":      str(item.get("id") or item.get("memberId") or item.get("profileId") or ""),
     }
 
 
