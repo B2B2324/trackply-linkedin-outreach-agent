@@ -59,11 +59,11 @@ def _choose_action(target: dict, conn_limit_reached: bool) -> str:
 
 def supervisor_node(state: OutreachState) -> OutreachState:
     """Check daily message limit and weekly connection request budget."""
-    print("[Supervisor] Checking limits...")
+    print("[Maya] Checking run limits...")
 
     if state.get("messages_sent_today", 0) >= config["daily_limit"]:
         state["status"] = "paused"
-        print(f"[Supervisor] Daily limit of {config['daily_limit']} reached.")
+        print(f"[Maya] Daily limit of {config['daily_limit']} reached.")
         return state
 
     # Hydrate weekly connection count from Supabase if not already in state
@@ -73,10 +73,10 @@ def supervisor_node(state: OutreachState) -> OutreachState:
     weekly_limit = config.get("weekly_connection_limit", 20)
     used = state["connection_requests_this_week"]
     remaining = max(0, weekly_limit - used)
-    print(f"[Supervisor] Connection requests this week: {used}/{weekly_limit} ({remaining} remaining)")
+    print(f"[Maya] Connection requests this week: {used}/{weekly_limit} ({remaining} remaining)")
 
     if remaining == 0:
-        print("[Supervisor] Weekly connection limit reached — will DM 1st-degree and OpenLink only.")
+        print("[Maya] Weekly connection limit reached — will DM 1st-degree and OpenLink only.")
 
     state["status"] = "active"
     return state
@@ -273,28 +273,14 @@ def personalizer_node(state: OutreachState) -> OutreachState:
 
 def _live_send(action: str, profile_url: str, message: str, target: dict) -> dict:
     """
-    Actually send a connection request or DM via the LinkedIn voyager API.
+    Send a connection request or DM via the LinkedIn voyager API, routed
+    through Apify's residential proxy to avoid Railway datacenter IP blocks.
+    Falls back to direct (no proxy) if APIFY_TOKEN is absent.
     Returns {"success": bool, "detail": str}.
     """
     try:
-        from src.linkedin_sender import sender_from_env
-        sender = sender_from_env()
-        if not sender:
-            return {
-                "success": False,
-                "detail": (
-                    "LinkedIn credentials not set. Add LINKEDIN_LI_AT, "
-                    "LINKEDIN_JSESSIONID, LINKEDIN_CSRF_TOKEN, and "
-                    "LINKEDIN_OWN_PROFILE_URL to Streamlit secrets."
-                ),
-            }
-        member_id = target.get("_linkedin_member_id", "")
-        if action == "connection_request":
-            return sender.send_connection_request(profile_url, note=message, member_id=member_id)
-        elif action == "dm":
-            return sender.send_dm(profile_url, message=message, member_id=member_id)
-        else:
-            return {"success": False, "detail": f"Unknown action: {action}"}
+        from src.apify_sender import apify_live_send
+        return apify_live_send(action, profile_url, message, target)
     except Exception as e:
         return {"success": False, "detail": str(e)}
 
@@ -430,31 +416,82 @@ def outreach_decider_node(state: OutreachState) -> OutreachState:
     return state
 
 
+def inbox_poll_node(state: OutreachState) -> OutreachState:
+    """
+    Poll the LinkedIn inbox via Apify and populate state['pending_replies']
+    with any replies from leads we've already contacted.
+    Skipped unless config['conversational_enabled'] is True.
+    """
+    if not config.get("conversational_enabled", False):
+        state["pending_replies"] = []
+        return state
+    print("[Maya] Polling LinkedIn inbox for replies…")
+    try:
+        from src.apify_inbox import poll_replies
+        # Build known_leads from supabase_lead_ids keys (all profiles we've reached)
+        known_leads = {url: url.split("/in/")[-1].split("/")[0]
+                       for url in state.get("supabase_lead_ids", {}).keys()}
+        replies = poll_replies(known_leads)
+        state["pending_replies"] = replies
+        state["replies_received"] = state.get("replies_received", 0) + len(replies)
+    except Exception as e:
+        print(f"[Maya] inbox_poll_node error: {e}")
+        state["pending_replies"] = []
+    return state
+
+
 def conversational_node(state: OutreachState) -> OutreachState:
-    """Handle inbound replies from 1st-degree connections."""
-    print("[Conversational] Checking for replies...")
+    """
+    Generate and send replies to leads who have replied to our outreach.
+    Reads from state['pending_replies'] (populated by inbox_poll_node).
+    """
+    pending = state.get("pending_replies") or []
+    if not pending:
+        print("[Maya] No pending replies — nothing to respond to")
+        return state
+
+    reply_cap = config.get("max_conversational_replies", 5)
+    if len(pending) > reply_cap:
+        print(f"[Maya] Capping inbox replies at {reply_cap} (have {len(pending)})")
+        pending = pending[:reply_cap]
+
+    print(f"[Maya] Responding to {len(pending)} reply(ies)…")
     system_prompt = load_prompt("conversational_prompt.txt")
 
-    for target in state.get("targets", []):
-        if not target.get("has_new_reply"):
+    for reply_item in pending:
+        profile_url = reply_item.get("profile_url", "")
+        name = reply_item.get("name", "")
+        reply_text = reply_item.get("reply_text", "")
+        if not profile_url or not reply_text:
             continue
         try:
             user_prompt = (
-                f"Profile: {json.dumps(target)}\n"
-                f"New reply: {target.get('new_reply_content', '')}"
+                f"Lead name: {name}\n"
+                f"Profile URL: {profile_url}\n"
+                f"Their reply: {reply_text}"
             )
-            reply = call_llm(system_prompt, user_prompt)
-            lead_id = state.get("supabase_lead_ids", {}).get(target.get("profile_url"))
+            generated = call_llm(system_prompt, user_prompt)
+
+            # Send the generated reply as a DM
+            send_result = _live_send("dm", profile_url, generated, {"name": name})
+            result_label = "sent" if send_result.get("success") else f"failed: {send_result.get('detail', '')}"
+            print(f"[Maya] Reply to {name}: {result_label}")
+
+            # Persist to Supabase if we have a lead_id
+            lead_id = state.get("supabase_lead_ids", {}).get(profile_url)
             if lead_id:
                 thread = [
-                    {"from": "lead", "content": target.get("new_reply_content")},
-                    {"from": "assistant", "content": reply},
+                    {"from": "lead", "content": reply_text},
+                    {"from": "maya", "content": generated},
                 ]
                 save_conversation(lead_id, thread)
-            record_reply(target.get("profile_url"), target.get("new_reply_content", ""))
-            target["generated_reply"] = reply
+
+            record_reply(profile_url, reply_text)
+            reply_item["generated_reply"] = generated
+            reply_item["send_result"] = result_label
+
         except Exception as e:
-            state.setdefault("errors", []).append(str(e))
+            state.setdefault("errors", []).append(f"Conversational error for {name}: {e}")
 
     return state
 
@@ -469,6 +506,7 @@ def build_graph():
     workflow.add_node("scout",             scout_node)
     workflow.add_node("personalizer",      personalizer_node)
     workflow.add_node("outreach_decider",  outreach_decider_node)
+    workflow.add_node("inbox_poll",        inbox_poll_node)
     workflow.add_node("conversational",    conversational_node)
 
     workflow.set_entry_point("supervisor")
@@ -482,7 +520,9 @@ def build_graph():
     workflow.add_conditional_edges("supervisor", route_after_supervisor)
     workflow.add_conditional_edges("scout",      route_after_scout)
     workflow.add_edge("personalizer",     "outreach_decider")
-    workflow.add_edge("outreach_decider", "conversational")
+    # After sending, poll inbox for any replies from earlier contacts
+    workflow.add_edge("outreach_decider", "inbox_poll")
+    workflow.add_edge("inbox_poll",       "conversational")
     workflow.add_edge("conversational",   END)
 
     return workflow.compile()

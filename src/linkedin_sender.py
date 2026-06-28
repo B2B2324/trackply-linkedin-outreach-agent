@@ -52,6 +52,7 @@ class LinkedInSender:
         csrf_token: str,
         own_profile_url: str,
         user_agent: str | None = None,
+        proxy_url: str | None = None,
     ):
         self.li_at = li_at
         self.jsessionid = jsessionid.strip('"')   # LinkedIn wraps JSESSIONID in quotes
@@ -62,10 +63,13 @@ class LinkedInSender:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
         )
+        self.proxy_url = proxy_url
         self.session = self._build_session()
 
     def _build_session(self) -> requests.Session:
         s = requests.Session()
+        if self.proxy_url:
+            s.proxies = {"http": self.proxy_url, "https": self.proxy_url}
         s.headers.update({
             "User-Agent": self.user_agent,
             "Accept": "application/vnd.linkedin.normalized+json+2.1",

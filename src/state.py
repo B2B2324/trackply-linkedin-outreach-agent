@@ -22,6 +22,13 @@ class ConversationThread(TypedDict, total=False):
     messages: List[Dict[str, str]]
     status: str
 
+class PendingReply(TypedDict, total=False):
+    profile_url: str
+    name: str
+    reply_text: str
+    thread_id: str
+    conversation_url: str
+
 class OutreachState(TypedDict, total=False):
     campaign_id: str
     run_date: str
@@ -36,3 +43,5 @@ class OutreachState(TypedDict, total=False):
     last_action_at: Optional[str]
     supabase_lead_ids: Dict[str, str]
     human_approval_required: bool
+    # Inbox polling — populated by inbox_poll_node, consumed by conversational_node
+    pending_replies: List[PendingReply]

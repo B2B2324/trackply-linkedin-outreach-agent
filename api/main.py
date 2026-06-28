@@ -1,8 +1,8 @@
 """
-FastAPI server for the Trackply LinkedIn Outreach Agent.
-Replaces Streamlit — exposes endpoints that the Agentic Labs dashboard calls.
+Maya — Trackply LinkedIn outreach agent.
+FastAPI server deployed on Railway; called by the Agentic Labs marketing dashboard.
 
-Deploy on Railway. Set env vars:
+Required env vars:
   ANTHROPIC_API_KEY, SUPABASE_SERVICE_KEY, APIFY_TOKEN,
   LINKEDIN_LI_AT, LINKEDIN_JSESSIONID, LINKEDIN_CSRF_TOKEN,
   LINKEDIN_OWN_PROFILE_URL
@@ -21,7 +21,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Trackply Marketing API")
+app = FastAPI(
+    title="Maya — Trackply LinkedIn Outreach Agent",
+    description="Automated LinkedIn outreach for Trackply (named after Maya Moore, UConn).",
+    version="1.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
