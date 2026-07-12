@@ -28,7 +28,15 @@ def _get_proxy_password(apify_token: str) -> str | None:
     try:
         client = ApifyClient(apify_token)
         user = client.user("me").get()
-        password = (user or {}).get("proxy", {}).get("password")
+        # apify-client >=3 returns a typed Pydantic model (UserPrivateInfo with
+        # a .proxy.password attribute); <=2 returned a plain dict. Dict-style
+        # .get() on the model raised AttributeError, which the except below
+        # swallowed into "no proxy URL" — every send then went DIRECT from a
+        # datacenter IP and LinkedIn's voyager API 403'd 100% of leads.
+        if isinstance(user, dict):
+            password = (user.get("proxy") or {}).get("password")
+        else:
+            password = getattr(getattr(user, "proxy", None), "password", None)
         if not password:
             print("[ApifySender] Could not get proxy password from Apify user info")
         return password
