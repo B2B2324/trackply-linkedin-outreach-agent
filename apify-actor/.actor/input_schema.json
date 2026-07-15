@@ -1,0 +1,54 @@
+{
+  "title": "LinkedIn Voyager Send input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "action": {
+      "title": "Action",
+      "type": "string",
+      "description": "What to do.",
+      "enum": ["connection_request", "dm", "selftest"],
+      "default": "selftest"
+    },
+    "profileUrl": {
+      "title": "Profile URL",
+      "type": "string",
+      "description": "Target LinkedIn profile URL (…/in/vanity). Not needed for selftest.",
+      "editor": "textfield"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string",
+      "description": "Note for a connection request (≤300 chars) or DM body.",
+      "editor": "textarea"
+    },
+    "memberId": {
+      "title": "Member ID",
+      "type": "string",
+      "description": "Optional numeric LinkedIn member id — skips a profile lookup if known.",
+      "editor": "textfield"
+    },
+    "csrfToken": {
+      "title": "CSRF token",
+      "type": "string",
+      "description": "LinkedIn csrf-token cookie value.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "liAt": {
+      "title": "li_at cookie",
+      "type": "string",
+      "description": "LinkedIn li_at session cookie.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "jsessionid": {
+      "title": "JSESSIONID cookie",
+      "type": "string",
+      "description": "LinkedIn JSESSIONID cookie value (without quotes).",
+      "editor": "textfield",
+      "isSecret": true
+    }
+  },
+  "required": ["action"]
+}

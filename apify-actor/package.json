@@ -1,0 +1,16 @@
+{
+  "name": "linkedin-voyager-send",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Owned Apify Actor that sends LinkedIn voyager connection requests / DMs through a residential proxy for Maya.",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "apify": "^3.2.6",
+    "got-scraping": "^4.1.1"
+  },
+  "scripts": {
+    "start": "node main.js"
+  }
+}
