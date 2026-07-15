@@ -89,26 +89,38 @@ async function getUrn() {
 let result;
 try {
     if (action === 'selftest') {
-        // Read-only: proves the proxied, cookie-authenticated voyager path works.
-        // Do NOT follow redirects — a redirect means LinkedIn is bouncing us to
-        // login/checkpoint (i.e. li_at isn't authenticating), which we want to
-        // surface rather than loop on.
+        // Two-part read-only check, no redirects followed.
+        // (1) GET /feed/ with ONLY li_at → isolates session-cookie validity
+        //     (200 = li_at good; 302 to login/authwall = li_at stale).
+        // (2) GET voyager /me → the full authenticated-API path.
+        const feed = await gotScraping({
+            url: 'https://www.linkedin.com/feed/',
+            headers: { cookie: `li_at=${liAt}` },
+            proxyUrl, throwHttpErrors: false, followRedirect: false,
+        });
+        const feedLoc = String(feed.headers?.location || '');
+        const liAtValid = feed.statusCode === 200;
+
         const res = await gotScraping({
             url: `${BASE}/me`, headers, proxyUrl,
             responseType: 'json', throwHttpErrors: false, followRedirect: false,
         });
         const authed = res.statusCode === 200;
-        const loc = res.headers?.location || '';
+        const loc = String(res.headers?.location || '');
+
         result = {
             success: authed,
             status_code: res.statusCode,
             authenticated: authed,
-            redirect_to: loc ? String(loc).slice(0, 160) : undefined,
+            li_at_valid: liAtValid,
+            feed_status: feed.statusCode,
+            feed_redirect: feedLoc ? feedLoc.slice(0, 120) : undefined,
+            voyager_redirect: loc ? loc.slice(0, 120) : undefined,
             detail: authed
-                ? 'Authenticated voyager call succeeded through the owned Actor + residential proxy.'
-                : (res.statusCode >= 300 && res.statusCode < 400)
-                    ? `LinkedIn redirected (${res.statusCode}) to ${String(loc).slice(0, 120)} — li_at not authenticating (cookie stale/invalid).`
-                    : `Voyager /me returned ${res.statusCode}.`,
+                ? 'Authenticated voyager call succeeded — send path is live.'
+                : !liAtValid
+                    ? `li_at is STALE: /feed/ returned ${feed.statusCode}${feedLoc ? ' → ' + feedLoc.slice(0, 80) : ''}. Re-capture LinkedIn cookies.`
+                    : `li_at is valid (/feed/ 200) but voyager /me returned ${res.statusCode}${loc ? ' → ' + loc.slice(0, 80) : ''}.`,
         };
     } else {
         const urn = await getUrn();
