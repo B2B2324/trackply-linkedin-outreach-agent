@@ -123,6 +123,20 @@ def health():
     return {"ok": True}
 
 
+@app.get("/selftest")
+def selftest():
+    """
+    Read-only check that the proxied-Actor voyager path authenticates (no
+    outreach is sent). Returns success=true when GET /voyager/api/me returns
+    200 through the Apify residential proxy — i.e. the send path is unblocked.
+    """
+    try:
+        from src.apify_sender import apify_selftest
+        return apify_selftest()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/runs/{run_id}/stop")
 def stop_run(run_id: str):
     run = _runs.get(run_id)
