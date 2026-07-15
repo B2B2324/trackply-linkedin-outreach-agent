@@ -93,19 +93,30 @@ async function getUrn() {
 let result;
 try {
     if (action === 'selftest') {
-        // Warm up the session (lets the jar collect lidc/bcookie), then hit
-        // the authenticated voyager /me. A 200 proves the whole send path.
-        await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: apiHeaders, ...common }).catch(() => {});
-        const res = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'json', ...common });
-        const authed = res.statusCode === 200;
+        // Rich single-hop diagnostic: no redirect following, dump exactly what
+        // LinkedIn returns so we can categorise the failure.
+        const noRedirect = { cookieJar: jar, proxyUrl, throwHttpErrors: false, followRedirect: false };
+        const feed = await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: apiHeaders, ...noRedirect });
+        const me = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...noRedirect });
+
+        const loc = String(me.headers?.location || feed.headers?.location || '');
+        const setC = me.headers?.['set-cookie'] || feed.headers?.['set-cookie'] || [];
+        const looksAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(loc);
+        const authed = me.statusCode === 200;
         result = {
             success: authed,
-            status_code: res.statusCode,
+            status_code: me.statusCode,
             authenticated: authed,
-            final_url: String(res.url || '').slice(0, 120),
+            feed_status: feed.statusCode,
+            redirect_location: loc ? loc.slice(0, 160) : undefined,
+            set_cookie_count: Array.isArray(setC) ? setC.length : (setC ? 1 : 0),
+            set_cookie_names: (Array.isArray(setC) ? setC : [setC]).filter(Boolean).map(c => String(c).split('=')[0]).slice(0, 12),
+            body_snippet: typeof me.body === 'string' ? me.body.slice(0, 160) : undefined,
             detail: authed
-                ? 'Authenticated voyager call succeeded — send path is live.'
-                : `voyager /me returned ${res.statusCode} (final url ${String(res.url || '').slice(0, 80)}). If this is a login/authwall URL, re-capture cookies.`,
+                ? 'Authenticated — send path live.'
+                : looksAuthwall
+                    ? `STALE COOKIES: LinkedIn redirected to an auth/login/checkpoint URL (${loc.slice(0, 90)}). Re-capture li_at + JSESSIONID from a logged-in session.`
+                    : `Ambiguous: /me=${me.statusCode}, /feed=${feed.statusCode}, loc="${loc.slice(0, 90)}", sets ${Array.isArray(setC) ? setC.length : 0} cookie(s).`,
         };
     } else {
         const urn = await getUrn();
