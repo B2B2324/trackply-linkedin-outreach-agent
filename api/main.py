@@ -123,6 +123,99 @@ def health():
     return {"ok": True}
 
 
+@app.post("/deploy-actor")
+def deploy_actor(confirm: str = ""):
+    """
+    One-shot: create + build the owned linkedin-voyager-send Actor ON the
+    same Apify account as Maya's APIFY_TOKEN (b2b2324), from the public GitHub
+    repo (folder apify-actor). Owned by the token's account => no cross-account
+    issue and no full-permissions grant. Lands at "<username>/linkedin-voyager-send",
+    which is exactly the SEND_ACTOR the sender already targets.
+
+    Guarded by ?confirm=yes so it can't fire accidentally.
+    """
+    if confirm != "yes":
+        raise HTTPException(status_code=400, detail="pass ?confirm=yes to deploy")
+
+    import requests
+
+    token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="APIFY_TOKEN not set")
+
+    H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    ACTOR_NAME = "linkedin-voyager-send"
+    GIT_URL = "https://github.com/B2B2324/trackply-linkedin-outreach-agent#main:apify-actor"
+    version = {
+        "versionNumber": "0.0",
+        "sourceType": "GIT_REPO",
+        "gitRepoUrl": GIT_URL,
+        "buildTag": "latest",
+    }
+
+    steps = []
+
+    # 1) Create the actor (or find it if it already exists).
+    r = requests.post("https://api.apify.com/v2/acts", headers=H,
+                      json={"name": ACTOR_NAME, "isPublic": False, "versions": [version]},
+                      timeout=45)
+    if r.status_code in (200, 201):
+        act = r.json()["data"]
+        steps.append("created")
+    else:
+        steps.append(f"create->{r.status_code}: {r.text[:160]}")
+        lst = requests.get("https://api.apify.com/v2/acts?my=1&limit=1000",
+                           headers=H, timeout=45).json()
+        act = next((a for a in lst.get("data", {}).get("items", [])
+                    if a.get("name") == ACTOR_NAME), None)
+        if not act:
+            raise HTTPException(status_code=500,
+                                detail=f"could not create or find actor: {r.status_code} {r.text[:200]}")
+        # Ensure the git source/version exists on the existing actor.
+        aid = act["id"]
+        up = requests.put(f"https://api.apify.com/v2/acts/{aid}/versions/0.0",
+                          headers=H, json=version, timeout=45)
+        if up.status_code not in (200, 201):
+            requests.post(f"https://api.apify.com/v2/acts/{aid}/versions",
+                          headers=H, json=version, timeout=45)
+        steps.append("reused")
+
+    actor_id = act["id"]
+    username = act.get("username")
+
+    # 2) Trigger a build.
+    b = requests.post(
+        f"https://api.apify.com/v2/acts/{actor_id}/builds?version=0.0&useCache=false",
+        headers=H, timeout=45)
+    if b.status_code not in (200, 201):
+        raise HTTPException(status_code=500, detail=f"build start failed: {b.status_code} {b.text[:200]}")
+    build = b.json().get("data", {})
+    build_id = build.get("id")
+
+    return {
+        "ok": True,
+        "steps": steps,
+        "actor_id": actor_id,
+        "full_name": f"{username}/{ACTOR_NAME}" if username else ACTOR_NAME,
+        "build_id": build_id,
+        "build_status": build.get("status"),
+        "note": "poll /deploy-status?build_id=... until SUCCEEDED, then /selftest",
+    }
+
+
+@app.get("/deploy-status")
+def deploy_status(build_id: str):
+    """Poll a build started by /deploy-actor."""
+    import requests
+    token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="APIFY_TOKEN not set")
+    r = requests.get(f"https://api.apify.com/v2/actor-builds/{build_id}",
+                     headers={"Authorization": f"Bearer {token}"}, timeout=45)
+    d = r.json().get("data", {})
+    return {"status": d.get("status"), "finished_at": d.get("finishedAt")}
+
+
 @app.get("/whoami")
 def whoami():
     """
