@@ -216,6 +216,46 @@ def deploy_status(build_id: str):
     return {"status": d.get("status"), "finished_at": d.get("finishedAt")}
 
 
+@app.get("/diag")
+def diag():
+    """
+    Non-secret diagnostics for the 403: reports Apify proxy access (does this
+    account have RESIDENTIAL?) and LinkedIn cred *shape* (lengths + whether
+    csrf-token equals JSESSIONID, which LinkedIn requires). Never returns the
+    actual secret values.
+    """
+    import requests
+    out = {}
+    token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+    # Apify proxy groups available to this account
+    try:
+        u = requests.get("https://api.apify.com/v2/users/me",
+                         headers={"Authorization": f"Bearer {token}"}, timeout=30).json().get("data", {})
+        proxy = u.get("proxy") or {}
+        groups = proxy.get("groups") or []
+        out["apify"] = {
+            "username": u.get("username"),
+            "plan": (u.get("plan") or {}).get("id"),
+            "proxy_groups": [g.get("name") for g in groups] if groups else [],
+            "has_residential": any((g.get("name") or "").upper() == "RESIDENTIAL" for g in groups),
+        }
+    except Exception as e:
+        out["apify"] = {"error": str(e)}
+
+    # LinkedIn cred shape (no values)
+    li_at = os.environ.get("LINKEDIN_LI_AT") or os.environ.get("li_at", "")
+    jsess = (os.environ.get("LINKEDIN_JSESSIONID") or os.environ.get("JSESSIONID", "")).strip('"')
+    csrf = os.environ.get("LINKEDIN_CSRF_TOKEN") or os.environ.get("csrf-token", "")
+    out["linkedin"] = {
+        "li_at_len": len(li_at),
+        "jsessionid_len": len(jsess),
+        "csrf_len": len(csrf),
+        "csrf_equals_jsessionid": bool(csrf) and csrf.strip('"') == jsess,
+        "li_at_prefix_ok": li_at.startswith("AQ"),  # li_at cookies start with AQ…
+    }
+    return out
+
+
 @app.get("/whoami")
 def whoami():
     """
