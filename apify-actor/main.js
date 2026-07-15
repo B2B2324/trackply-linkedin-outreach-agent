@@ -1,24 +1,24 @@
 /**
  * linkedin-voyager-send — a small Apify Actor OWNED by the Maya account.
  *
- * Why this exists: Maya runs on Railway (a datacenter IP that LinkedIn's
- * voyager API blocks with 403/404). Apify's residential proxy fixes that,
- * but connecting to Apify Proxy from *outside* Apify requires a paid plan,
- * and the official code-running scrapers (apify/web-scraper, cheerio-scraper)
- * require a "full permissions" grant that the FREE plan won't extend to API
- * runs. An Actor you OWN needs no such grant — so this Actor performs the
- * voyager call from inside Apify, on a residential IP, and Maya calls it by
- * name via the API.
+ * Performs a LinkedIn voyager connection-request / DM / selftest from inside
+ * Apify on a residential IP. Actors you own need no full-permissions grant, so
+ * this runs on the FREE plan (unlike apify/web-scraper).
  *
- * Input:
- *   { action, profileUrl, message, memberId, csrfToken, liAt, jsessionid }
+ * Auth model (matches a real browser / requests.Session):
+ *   - a tough-cookie jar seeded with li_at + JSESSIONID, so LinkedIn's
+ *     cookie-bootstrap 302s (Set-Cookie lidc/bcookie/…, redirect to same URL)
+ *     resolve instead of looping;
+ *   - csrf-token header derived from JSESSIONID (LinkedIn requires them equal);
+ *   - got-scraping for browser-like TLS/header fingerprint.
+ *
+ * Input: { action, profileUrl, message, memberId, csrfToken, liAt, jsessionid }
  *   action ∈ "connection_request" | "dm" | "selftest"
- *
- * Output (single dataset item + OUTPUT key-value record):
- *   { success, status_code, detail, authenticated? }
+ * Output (one dataset item): { success, status_code, detail, ... }
  */
 import { Actor } from 'apify';
 import { gotScraping } from 'got-scraping';
+import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 
@@ -28,7 +28,6 @@ const {
     profileUrl = '',
     message = '',
     memberId = '',
-    csrfToken = '',
     liAt = '',
     jsessionid = '',
 } = input;
@@ -41,26 +40,33 @@ const proxyConfiguration = await Actor.createProxyConfiguration({
 });
 const proxyUrl = await proxyConfiguration.newUrl();
 
-// LinkedIn's csrf-token header MUST equal the JSESSIONID cookie value.
-// A mismatched standalone csrf token is the classic cause of a 403 on every
-// voyager write. Derive it from JSESSIONID so the two can never disagree;
-// fall back to the passed csrfToken only if JSESSIONID is somehow absent.
+// LinkedIn's csrf-token header MUST equal the JSESSIONID cookie value; deriving
+// it from JSESSIONID makes a mismatch impossible.
 const jsess = String(jsessionid).replace(/"/g, '');
-const csrf = jsess || csrfToken;
 
-const cookie =
-    `li_at=${liAt}; ` +
-    `JSESSIONID="${jsess}"; ` +
-    `lang=v=2&lang=en-us`;
+// Cookie jar, seeded like a logged-in browser. LinkedIn will add lidc/bcookie
+// via Set-Cookie on the first request; the jar carries them on the retry.
+const jar = new CookieJar();
+async function seed(cookieStr) {
+    try { await jar.setCookie(cookieStr, 'https://www.linkedin.com'); } catch { /* best effort */ }
+}
+await seed(`li_at=${liAt}; Domain=.linkedin.com; Path=/; Secure`);
+await seed(`JSESSIONID="${jsess}"; Domain=.linkedin.com; Path=/; Secure`);
 
-const headers = {
+const apiHeaders = {
     accept: 'application/vnd.linkedin.normalized+json+2.1',
     'accept-language': 'en-US,en;q=0.9',
     'x-restli-protocol-version': '2.0.0',
     'x-li-lang': 'en_US',
-    'csrf-token': csrf,
-    cookie,
+    'x-li-track': JSON.stringify({
+        clientVersion: '1.13.15117', mpVersion: '1.13.15117', osName: 'web',
+        timezoneOffset: -7, timezone: 'America/Los_Angeles', deviceFormFactor: 'DESKTOP',
+        mpName: 'voyager-web', displayDensity: 1, displayWidth: 1920, displayHeight: 1080,
+    }),
+    'csrf-token': jsess,
 };
+
+const common = { cookieJar: jar, proxyUrl, throwHttpErrors: false, followRedirect: true, maxRedirects: 5 };
 
 function trackingId() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -78,9 +84,7 @@ async function getUrn() {
         `${BASE}/identity/dash/profiles?q=memberIdentity` +
         `&memberIdentity=${encodeURIComponent(publicId)}` +
         `&decorationId=com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-91`;
-    const res = await gotScraping({
-        url, headers, proxyUrl, responseType: 'json', throwHttpErrors: false,
-    });
+    const res = await gotScraping({ url, headers: apiHeaders, responseType: 'json', ...common });
     if (res.statusCode !== 200) return null;
     const el = (res.body?.elements || [])[0];
     return el ? el.entityUrn || el['*profile'] : null;
@@ -89,43 +93,24 @@ async function getUrn() {
 let result;
 try {
     if (action === 'selftest') {
-        // Two-part read-only check, no redirects followed.
-        // (1) GET /feed/ with ONLY li_at → isolates session-cookie validity
-        //     (200 = li_at good; 302 to login/authwall = li_at stale).
-        // (2) GET voyager /me → the full authenticated-API path.
-        const feed = await gotScraping({
-            url: 'https://www.linkedin.com/feed/',
-            headers: { cookie: `li_at=${liAt}` },
-            proxyUrl, throwHttpErrors: false, followRedirect: false,
-        });
-        const feedLoc = String(feed.headers?.location || '');
-        const liAtValid = feed.statusCode === 200;
-
-        const res = await gotScraping({
-            url: `${BASE}/me`, headers, proxyUrl,
-            responseType: 'json', throwHttpErrors: false, followRedirect: false,
-        });
+        // Warm up the session (lets the jar collect lidc/bcookie), then hit
+        // the authenticated voyager /me. A 200 proves the whole send path.
+        await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: apiHeaders, ...common }).catch(() => {});
+        const res = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'json', ...common });
         const authed = res.statusCode === 200;
-        const loc = String(res.headers?.location || '');
-
         result = {
             success: authed,
             status_code: res.statusCode,
             authenticated: authed,
-            li_at_valid: liAtValid,
-            feed_status: feed.statusCode,
-            feed_redirect: feedLoc ? feedLoc.slice(0, 120) : undefined,
-            voyager_redirect: loc ? loc.slice(0, 120) : undefined,
+            final_url: String(res.url || '').slice(0, 120),
             detail: authed
                 ? 'Authenticated voyager call succeeded — send path is live.'
-                : !liAtValid
-                    ? `li_at is STALE: /feed/ returned ${feed.statusCode}${feedLoc ? ' → ' + feedLoc.slice(0, 80) : ''}. Re-capture LinkedIn cookies.`
-                    : `li_at is valid (/feed/ 200) but voyager /me returned ${res.statusCode}${loc ? ' → ' + loc.slice(0, 80) : ''}.`,
+                : `voyager /me returned ${res.statusCode} (final url ${String(res.url || '').slice(0, 80)}). If this is a login/authwall URL, re-capture cookies.`,
         };
     } else {
         const urn = await getUrn();
         if (!urn) {
-            result = { success: false, detail: 'Could not resolve profile URN' };
+            result = { success: false, detail: 'Could not resolve profile URN (auth or bad profile URL)' };
         } else {
             const memberNum = urn.split(':').pop();
             let url;
@@ -162,8 +147,8 @@ try {
             }
 
             const res = await gotScraping({
-                url, method: 'POST', headers,
-                proxyUrl, json: payload, responseType: 'json', throwHttpErrors: false,
+                url, method: 'POST', headers: { ...apiHeaders, 'content-type': 'application/json' },
+                json: payload, responseType: 'json', ...common,
             });
             const ok = res.statusCode === 200 || res.statusCode === 201;
             let detail = 'sent';
