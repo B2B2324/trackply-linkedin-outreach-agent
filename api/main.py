@@ -123,6 +123,36 @@ def health():
     return {"ok": True}
 
 
+@app.get("/whoami")
+def whoami():
+    """
+    Diagnostic: report which Apify account the Railway APIFY_TOKEN belongs to
+    (username + plan only — never the token). Used to confirm the actor was
+    authorized on the SAME account whose token Maya uses.
+    """
+    try:
+        from apify_client import ApifyClient
+        token = os.environ.get("APIFY_TOKEN") or os.environ.get("APIFY_API_TOKEN")
+        if not token:
+            return {"ok": False, "detail": "APIFY_TOKEN not set"}
+        user = ApifyClient(token).user("me").get()
+        def field(obj, *keys):
+            for k in keys:
+                if isinstance(obj, dict) and obj.get(k) is not None:
+                    return obj[k]
+                if not isinstance(obj, dict) and getattr(obj, k, None) is not None:
+                    return getattr(obj, k)
+            return None
+        return {
+            "ok": True,
+            "username": field(user, "username"),
+            "user_id": field(user, "id", "userId"),
+            "plan": field(field(user, "plan") or {}, "id", "tier") if field(user, "plan") else None,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/selftest")
 def selftest():
     """
