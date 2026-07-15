@@ -170,7 +170,12 @@ def _run_voyager_actor(creds: dict, page_function: str, custom_data: dict,
 
     client = ApifyClient(creds["token"])
     try:
-        run = client.actor(SEND_ACTOR).call(run_input=run_input, timeout_secs=120)
+        # NOTE: this apify-client version rejects wait_secs/timeout_secs on
+        # .call() (see src/apify_linkedin.py). Bound the run via the Actor's
+        # own input instead so a stuck page can't hang the request forever.
+        run_input["pageFunctionTimeoutSecs"] = 60
+        run_input["pageLoadTimeoutSecs"] = 45
+        run = client.actor(SEND_ACTOR).call(run_input=run_input)
     except Exception as e:
         print(f"[ApifySender] {label}: Actor run failed to start: {e}")
         return {"ok": False, "item": None, "detail": f"Actor run failed to start: {e}", "run_status": "START_FAILED"}
