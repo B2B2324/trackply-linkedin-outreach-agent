@@ -41,9 +41,16 @@ const proxyConfiguration = await Actor.createProxyConfiguration({
 });
 const proxyUrl = await proxyConfiguration.newUrl();
 
+// LinkedIn's csrf-token header MUST equal the JSESSIONID cookie value.
+// A mismatched standalone csrf token is the classic cause of a 403 on every
+// voyager write. Derive it from JSESSIONID so the two can never disagree;
+// fall back to the passed csrfToken only if JSESSIONID is somehow absent.
+const jsess = String(jsessionid).replace(/"/g, '');
+const csrf = jsess || csrfToken;
+
 const cookie =
     `li_at=${liAt}; ` +
-    `JSESSIONID="${String(jsessionid).replace(/"/g, '')}"; ` +
+    `JSESSIONID="${jsess}"; ` +
     `lang=v=2&lang=en-us`;
 
 const headers = {
@@ -51,7 +58,7 @@ const headers = {
     'accept-language': 'en-US,en;q=0.9',
     'x-restli-protocol-version': '2.0.0',
     'x-li-lang': 'en_US',
-    'csrf-token': csrfToken,
+    'csrf-token': csrf,
     cookie,
 };
 
