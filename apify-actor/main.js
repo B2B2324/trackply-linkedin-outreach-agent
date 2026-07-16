@@ -93,40 +93,65 @@ async function getUrn() {
 let result;
 try {
     if (action === 'selftest') {
-        // Two-part diagnostic:
-        //   (1) single-hop, no redirect — shows LinkedIn's raw first response
-        //       (the cookie-bootstrap 302 is normal, NOT a failure);
-        //   (2) redirect-FOLLOWING GET /me — this is what the real send path
-        //       does, so its FINAL status is the ground truth for "authed".
-        const noRedirect = { cookieJar: jar, proxyUrl, throwHttpErrors: false, followRedirect: false };
-        const hop1 = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...noRedirect });
-        const loc = String(hop1.headers?.location || '');
-        const setC = hop1.headers?.['set-cookie'] || [];
-        const looksAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(loc);
+        // Decisive diagnostic: bypass the tough-cookie jar entirely and drive
+        // the Cookie header MANUALLY, following LinkedIn's bootstrap by hand up
+        // to 3 hops. This separates two very different failure modes:
+        //   • li_at genuinely stale  → every hop 302s / lands on authwall
+        //   • jar/proxy dropped cookies on the retry → manual hop 2 returns 200
+        // Each hop re-reads Set-Cookie and merges it into the Cookie header,
+        // exactly what a browser does.
+        const cookies = new Map();
+        cookies.set('li_at', String(liAt));
+        cookies.set('JSESSIONID', `"${jsess}"`);
+        const cookieHeader = () => [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+        const mergeSetCookie = (setC) => {
+            for (const raw of (Array.isArray(setC) ? setC : [setC]).filter(Boolean)) {
+                const [pair] = String(raw).split(';');
+                const idx = pair.indexOf('=');
+                if (idx > 0) cookies.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
+            }
+        };
 
-        // (2) Follow redirects exactly like getUrn()/send do (common: maxRedirects 5).
-        const meFollowed = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...common });
-        const finalStatus = meFollowed.statusCode;
-        const finalUrl = String(meFollowed.url || meFollowed.requestUrl || '');
-        const finalAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(finalUrl)
-            || /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(String(meFollowed.body || '').slice(0, 400));
-        const authed = finalStatus === 200 && !finalAuthwall;
+        const manual = { proxyUrl, throwHttpErrors: false, followRedirect: false, responseType: 'text' };
+        const hops = [];
+        let last;
+        for (let i = 0; i < 3; i++) {
+            last = await gotScraping({
+                url: `${BASE}/me`,
+                headers: { ...apiHeaders, cookie: cookieHeader() },
+                ...manual,
+            });
+            const loc = String(last.headers?.location || '');
+            const setC = last.headers?.['set-cookie'] || [];
+            hops.push({
+                status: last.statusCode,
+                loc: loc.slice(0, 90),
+                set: (Array.isArray(setC) ? setC : [setC]).filter(Boolean).map(c => String(c).split('=')[0]),
+            });
+            if (last.statusCode === 200 || !loc) break;
+            mergeSetCookie(setC);
+        }
+
+        const finalStatus = last.statusCode;
+        const sawAuthwall = hops.some(h => /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(h.loc));
+        const loopToSelf = hops.length >= 3 && hops.every(h => h.status >= 300 && h.status < 400);
+        const authed = finalStatus === 200
+            && /"(plainId|miniProfile|entityUrn)"/.test(String(last.body || '').slice(0, 400));
 
         result = {
             success: authed,
             status_code: finalStatus,
             authenticated: authed,
-            hop1_status: hop1.statusCode,
-            hop1_redirect_location: loc ? loc.slice(0, 160) : undefined,
-            final_url: finalUrl ? finalUrl.slice(0, 160) : undefined,
-            set_cookie_count: Array.isArray(setC) ? setC.length : (setC ? 1 : 0),
-            set_cookie_names: (Array.isArray(setC) ? setC : [setC]).filter(Boolean).map(c => String(c).split('=')[0]).slice(0, 12),
-            body_snippet: typeof meFollowed.body === 'string' ? meFollowed.body.slice(0, 200) : undefined,
+            cookies_sent: [...cookies.keys()].slice(0, 12),
+            hops,
+            body_snippet: typeof last.body === 'string' ? last.body.slice(0, 200) : undefined,
             detail: authed
-                ? 'Authenticated — GET /me returned 200 after redirects. Send path live.'
-                : (finalAuthwall || looksAuthwall)
-                    ? `STALE COOKIES: LinkedIn landed on an auth/login/checkpoint page (final=${finalStatus}, url="${finalUrl.slice(0, 90)}"). Re-capture li_at + JSESSIONID from a logged-in session.`
-                    : `Not authed after redirects: hop1=${hop1.statusCode}→"${loc.slice(0, 60)}", final=${finalStatus}, url="${finalUrl.slice(0, 90)}".`,
+                ? 'Authenticated — GET /me returned 200 with a member profile. Send path live.'
+                : sawAuthwall
+                    ? `STALE COOKIES: LinkedIn sent us to an auth/login/checkpoint page. Re-capture li_at + JSESSIONID from a logged-in session.`
+                    : loopToSelf
+                        ? `li_at NOT accepted: every hop 302'd back to /me even with all Set-Cookie merged (li_at len=${String(liAt).length}). Almost certainly a stale/invalid li_at — re-capture it.`
+                        : `Not authed: final=${finalStatus}. Hops: ${JSON.stringify(hops).slice(0, 200)}`,
         };
     } else {
         const urn = await getUrn();
