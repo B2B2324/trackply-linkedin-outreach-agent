@@ -38,7 +38,13 @@ const proxyConfiguration = await Actor.createProxyConfiguration({
     groups: ['RESIDENTIAL'],
     countryCode: 'US',
 });
-const proxyUrl = await proxyConfiguration.newUrl();
+// STICKY SESSION — pin every hop to ONE residential IP. Without a session id,
+// Apify rotates the exit IP per request; LinkedIn binds __cf_bm/lidc to the IP
+// that issued them, so the next hop (different IP) is treated as a fresh
+// visitor and 302-loops forever even with a valid li_at. A single session id
+// makes all requests share one IP, so the bootstrap cookies converge.
+const sessionId = `maya_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+const proxyUrl = await proxyConfiguration.newUrl(sessionId);
 
 // LinkedIn's csrf-token header MUST equal the JSESSIONID cookie value; deriving
 // it from JSESSIONID makes a mismatch impossible.
