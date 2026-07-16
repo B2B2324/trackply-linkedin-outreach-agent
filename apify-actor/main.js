@@ -127,6 +127,29 @@ try {
         };
 
         const manual = { proxyUrl, throwHttpErrors: false, followRedirect: false, responseType: 'text' };
+
+        // CONTROL PROBES — do the proxy + fingerprint reach LinkedIn at all, and
+        // does an anonymous request behave differently from our authenticated one?
+        //   public_home: GET / with NO cookies. 200 = proxy/fingerprint is fine,
+        //     so any auth failure is the COOKIE. Loop/challenge here = the
+        //     proxied got-scraping request is bot-bounced regardless of cookie.
+        //   anon_feed: GET /feed/ with NO cookies. A normal logged-out response
+        //     redirects to /authwall|/login; if instead it loops to /feed/ just
+        //     like ours, the loop is fingerprint-driven, not cookie-driven.
+        const controlOpts = { proxyUrl, throwHttpErrors: false, followRedirect: true, maxRedirects: 4, responseType: 'text' };
+        let publicHome, anonFeed;
+        try {
+            publicHome = await gotScraping({ url: 'https://www.linkedin.com/', headers: { accept: 'text/html' }, ...controlOpts });
+        } catch (e) { publicHome = { statusCode: `ERR:${String(e.message).slice(0, 40)}` }; }
+        try {
+            anonFeed = await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: { accept: 'text/html' }, ...controlOpts });
+        } catch (e) { anonFeed = { statusCode: `ERR:${String(e.message).slice(0, 40)}` }; }
+        const control = {
+            public_home_status: publicHome.statusCode,
+            public_home_final: String(publicHome.url || '').slice(0, 90),
+            anon_feed_status: anonFeed.statusCode,
+            anon_feed_final: String(anonFeed.url || '').slice(0, 90),
+        };
         // Never let LinkedIn's Set-Cookie overwrite the USER's real li_at with a
         // guest one during merge — that would sabotage every hop after the first.
         const realLiAt = String(liAt);
@@ -175,6 +198,7 @@ try {
             feed_final_url: feedFinalUrl.slice(0, 160),
             feed_hops: feedHops,
             me_hops: meHops,
+            control,
             cookies_after_warmup: [...cookies.keys()].slice(0, 14),
             body_snippet: typeof me.body === 'string' ? me.body.slice(0, 200) : undefined,
             detail: authed
