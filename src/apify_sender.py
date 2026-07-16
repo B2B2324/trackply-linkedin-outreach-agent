@@ -153,7 +153,8 @@ def apify_selftest() -> dict:
     # can see the redirect chain / cookie names without another round-trip.
     passthrough = {
         k: item[k]
-        for k in ("hops", "cookies_sent", "body_snippet")
+        for k in ("logged_in_feed", "feed_final_url", "feed_hops", "me_hops",
+                  "cookies_after_warmup", "body_snippet")
         if k in item
     }
     return {

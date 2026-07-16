@@ -75,6 +75,20 @@ function trackingId() {
     return Buffer.from(raw).toString('base64');
 }
 
+// Browser-like warmup: hit the HTML feed so Cloudflare (__cf_bm) and LinkedIn
+// (bcookie/bscookie/lidc) seed the jar before any voyager XHR. Without this,
+// voyager 302-loops even for a valid li_at. Returns true if we landed on the
+// logged-in feed.
+async function warmup() {
+    const res = await gotScraping({
+        url: 'https://www.linkedin.com/feed/',
+        headers: { ...apiHeaders, accept: 'text/html' },
+        responseType: 'text', ...common,
+    });
+    const finalUrl = String(res.url || res.requestUrl || '');
+    return res.statusCode === 200 && /\/feed\/?$/.test(finalUrl);
+}
+
 async function getUrn() {
     if (memberId) return `urn:li:member:${memberId}`;
     const parts = profileUrl.replace(/\/$/, '').split('/in/');
@@ -113,50 +127,74 @@ try {
         };
 
         const manual = { proxyUrl, throwHttpErrors: false, followRedirect: false, responseType: 'text' };
-        const hops = [];
-        let last;
-        for (let i = 0; i < 3; i++) {
-            last = await gotScraping({
-                url: `${BASE}/me`,
-                headers: { ...apiHeaders, cookie: cookieHeader() },
-                ...manual,
-            });
-            const loc = String(last.headers?.location || '');
-            const setC = last.headers?.['set-cookie'] || [];
-            hops.push({
-                status: last.statusCode,
-                loc: loc.slice(0, 90),
-                set: (Array.isArray(setC) ? setC : [setC]).filter(Boolean).map(c => String(c).split('=')[0]),
-            });
-            if (last.statusCode === 200 || !loc) break;
-            mergeSetCookie(setC);
-        }
+        // Never let LinkedIn's Set-Cookie overwrite the USER's real li_at with a
+        // guest one during merge — that would sabotage every hop after the first.
+        const realLiAt = String(liAt);
+        const mergeKeepingLiAt = (setC) => { mergeSetCookie(setC); cookies.set('li_at', realLiAt); };
 
-        const finalStatus = last.statusCode;
-        const sawAuthwall = hops.some(h => /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(h.loc));
-        const loopToSelf = hops.length >= 3 && hops.every(h => h.status >= 300 && h.status < 400);
-        const authed = finalStatus === 200
-            && /"(plainId|miniProfile|entityUrn)"/.test(String(last.body || '').slice(0, 400));
+        // STEP 1 — warm up on the HTML app the way a browser does: GET /feed/,
+        // following redirects by hand, so Cloudflare (__cf_bm) and LinkedIn
+        // (bcookie/bscookie/lidc) issue their cookies and a VALID li_at lands on
+        // the real feed. Where this ends is the ground truth for the session:
+        //   ends on /feed/ (200)         → logged in
+        //   ends on /authwall|/login|... → li_at is dead
+        const feedHops = [];
+        let feed;
+        let feedUrl = 'https://www.linkedin.com/feed/';
+        for (let i = 0; i < 4; i++) {
+            feed = await gotScraping({ url: feedUrl, headers: { ...apiHeaders, accept: 'text/html', cookie: cookieHeader() }, ...manual });
+            const loc = String(feed.headers?.location || '');
+            feedHops.push({ status: feed.statusCode, loc: loc.slice(0, 90) });
+            mergeKeepingLiAt(feed.headers?.['set-cookie'] || []);
+            if (feed.statusCode === 200 || !loc) break;
+            feedUrl = loc.startsWith('http') ? loc : `https://www.linkedin.com${loc}`;
+        }
+        const feedFinalUrl = feedUrl;
+        const feedAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(feedFinalUrl)
+            || feedHops.some(h => /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(h.loc));
+        const loggedIn = feed.statusCode === 200 && /\/feed\/?$/.test(feedFinalUrl) && !feedAuthwall;
+
+        // STEP 2 — with the warmed-up cookie set, hit the voyager API.
+        const meHops = [];
+        let me;
+        for (let i = 0; i < 3; i++) {
+            me = await gotScraping({ url: `${BASE}/me`, headers: { ...apiHeaders, cookie: cookieHeader() }, ...manual });
+            const loc = String(me.headers?.location || '');
+            meHops.push({ status: me.statusCode, loc: loc.slice(0, 90) });
+            if (me.statusCode === 200 || !loc) break;
+            mergeKeepingLiAt(me.headers?.['set-cookie'] || []);
+        }
+        const authed = me.statusCode === 200
+            && /"(plainId|miniProfile|entityUrn)"/.test(String(me.body || '').slice(0, 400));
 
         result = {
             success: authed,
-            status_code: finalStatus,
+            status_code: me.statusCode,
             authenticated: authed,
-            cookies_sent: [...cookies.keys()].slice(0, 12),
-            hops,
-            body_snippet: typeof last.body === 'string' ? last.body.slice(0, 200) : undefined,
+            logged_in_feed: loggedIn,
+            feed_final_url: feedFinalUrl.slice(0, 160),
+            feed_hops: feedHops,
+            me_hops: meHops,
+            cookies_after_warmup: [...cookies.keys()].slice(0, 14),
+            body_snippet: typeof me.body === 'string' ? me.body.slice(0, 200) : undefined,
             detail: authed
-                ? 'Authenticated — GET /me returned 200 with a member profile. Send path live.'
-                : sawAuthwall
-                    ? `STALE COOKIES: LinkedIn sent us to an auth/login/checkpoint page. Re-capture li_at + JSESSIONID from a logged-in session.`
-                    : loopToSelf
-                        ? `li_at NOT accepted: every hop 302'd back to /me even with all Set-Cookie merged (li_at len=${String(liAt).length}). Almost certainly a stale/invalid li_at — re-capture it.`
-                        : `Not authed: final=${finalStatus}. Hops: ${JSON.stringify(hops).slice(0, 200)}`,
+                ? 'Authenticated — /feed/ 200 then voyager /me 200 with a member profile. Send path live.'
+                : feedAuthwall || !loggedIn
+                    ? `STALE / INVALID li_at: the /feed/ warmup ended on "${feedFinalUrl.slice(0, 90)}" instead of the logged-in feed, so LinkedIn does not accept this session. Re-capture li_at (and JSESSIONID) from a browser where you are logged in.`
+                    : `li_at accepted for /feed/ but voyager /me still ${me.statusCode} — API-header issue, not the cookie. me_hops=${JSON.stringify(meHops).slice(0, 150)}`,
         };
     } else {
+        // Warm up the session (seed __cf_bm / bcookie / lidc) so the voyager
+        // calls below aren't treated as anonymous and 302-looped.
+        const warm = await warmup();
         const urn = await getUrn();
         if (!urn) {
-            result = { success: false, detail: 'Could not resolve profile URN (auth or bad profile URL)' };
+            result = {
+                success: false,
+                detail: warm
+                    ? 'Logged in, but could not resolve profile URN (bad profile URL?)'
+                    : 'Auth failed: /feed/ warmup did not reach the logged-in feed — li_at is stale/invalid. Re-capture it.',
+            };
         } else {
             const memberNum = urn.split(':').pop();
             let url;
