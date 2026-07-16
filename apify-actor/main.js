@@ -120,6 +120,7 @@ try {
         //   • jar/proxy dropped cookies on the retry → manual hop 2 returns 200
         // Each hop re-reads Set-Cookie and merges it into the Cookie header,
         // exactly what a browser does.
+        const realLiAtProbe = String(liAt);
         const cookies = new Map();
         cookies.set('li_at', String(liAt));
         cookies.set('JSESSIONID', `"${jsess}"`);
@@ -150,11 +151,26 @@ try {
         try {
             anonFeed = await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: { accept: 'text/html' }, ...controlOpts });
         } catch (e) { anonFeed = { statusCode: `ERR:${String(e.message).slice(0, 40)}` }; }
+        // li_at ONLY — is a stale/mismatched JSESSIONID poisoning an otherwise
+        // valid li_at? If this lands on the logged-in feed, the fix is code-side
+        // (don't send JSESSIONID on GETs). If it still loops, the li_at itself
+        // is not a valid member session.
+        let liatOnly;
+        try {
+            liatOnly = await gotScraping({
+                url: 'https://www.linkedin.com/feed/',
+                headers: { ...apiHeaders, accept: 'text/html', cookie: `li_at=${realLiAtProbe}` },
+                ...controlOpts,
+            });
+        } catch (e) { liatOnly = { statusCode: `ERR:${String(e.message).slice(0, 40)}` }; }
+
         const control = {
             public_home_status: publicHome.statusCode,
             public_home_final: String(publicHome.url || '').slice(0, 90),
             anon_feed_status: anonFeed.statusCode,
             anon_feed_final: String(anonFeed.url || '').slice(0, 90),
+            liat_only_status: liatOnly.statusCode,
+            liat_only_final: String(liatOnly.url || '').slice(0, 90),
         };
         // Never let LinkedIn's Set-Cookie overwrite the USER's real li_at with a
         // guest one during merge — that would sabotage every hop after the first.
