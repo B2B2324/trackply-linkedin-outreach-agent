@@ -93,30 +93,40 @@ async function getUrn() {
 let result;
 try {
     if (action === 'selftest') {
-        // Rich single-hop diagnostic: no redirect following, dump exactly what
-        // LinkedIn returns so we can categorise the failure.
+        // Two-part diagnostic:
+        //   (1) single-hop, no redirect — shows LinkedIn's raw first response
+        //       (the cookie-bootstrap 302 is normal, NOT a failure);
+        //   (2) redirect-FOLLOWING GET /me — this is what the real send path
+        //       does, so its FINAL status is the ground truth for "authed".
         const noRedirect = { cookieJar: jar, proxyUrl, throwHttpErrors: false, followRedirect: false };
-        const feed = await gotScraping({ url: 'https://www.linkedin.com/feed/', headers: apiHeaders, ...noRedirect });
-        const me = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...noRedirect });
-
-        const loc = String(me.headers?.location || feed.headers?.location || '');
-        const setC = me.headers?.['set-cookie'] || feed.headers?.['set-cookie'] || [];
+        const hop1 = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...noRedirect });
+        const loc = String(hop1.headers?.location || '');
+        const setC = hop1.headers?.['set-cookie'] || [];
         const looksAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(loc);
-        const authed = me.statusCode === 200;
+
+        // (2) Follow redirects exactly like getUrn()/send do (common: maxRedirects 5).
+        const meFollowed = await gotScraping({ url: `${BASE}/me`, headers: apiHeaders, responseType: 'text', ...common });
+        const finalStatus = meFollowed.statusCode;
+        const finalUrl = String(meFollowed.url || meFollowed.requestUrl || '');
+        const finalAuthwall = /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(finalUrl)
+            || /authwall|\/login|\/uas\/login|checkpoint|challenge/i.test(String(meFollowed.body || '').slice(0, 400));
+        const authed = finalStatus === 200 && !finalAuthwall;
+
         result = {
             success: authed,
-            status_code: me.statusCode,
+            status_code: finalStatus,
             authenticated: authed,
-            feed_status: feed.statusCode,
-            redirect_location: loc ? loc.slice(0, 160) : undefined,
+            hop1_status: hop1.statusCode,
+            hop1_redirect_location: loc ? loc.slice(0, 160) : undefined,
+            final_url: finalUrl ? finalUrl.slice(0, 160) : undefined,
             set_cookie_count: Array.isArray(setC) ? setC.length : (setC ? 1 : 0),
             set_cookie_names: (Array.isArray(setC) ? setC : [setC]).filter(Boolean).map(c => String(c).split('=')[0]).slice(0, 12),
-            body_snippet: typeof me.body === 'string' ? me.body.slice(0, 160) : undefined,
+            body_snippet: typeof meFollowed.body === 'string' ? meFollowed.body.slice(0, 200) : undefined,
             detail: authed
-                ? 'Authenticated — send path live.'
-                : looksAuthwall
-                    ? `STALE COOKIES: LinkedIn redirected to an auth/login/checkpoint URL (${loc.slice(0, 90)}). Re-capture li_at + JSESSIONID from a logged-in session.`
-                    : `Ambiguous: /me=${me.statusCode}, /feed=${feed.statusCode}, loc="${loc.slice(0, 90)}", sets ${Array.isArray(setC) ? setC.length : 0} cookie(s).`,
+                ? 'Authenticated — GET /me returned 200 after redirects. Send path live.'
+                : (finalAuthwall || looksAuthwall)
+                    ? `STALE COOKIES: LinkedIn landed on an auth/login/checkpoint page (final=${finalStatus}, url="${finalUrl.slice(0, 90)}"). Re-capture li_at + JSESSIONID from a logged-in session.`
+                    : `Not authed after redirects: hop1=${hop1.statusCode}→"${loc.slice(0, 60)}", final=${finalStatus}, url="${finalUrl.slice(0, 90)}".`,
         };
     } else {
         const urn = await getUrn();

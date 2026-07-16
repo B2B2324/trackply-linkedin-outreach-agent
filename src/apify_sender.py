@@ -149,6 +149,14 @@ def apify_selftest() -> dict:
     authenticated = bool(item.get("authenticated"))
     success = bool(item.get("success")) and authenticated
     print(f"[ApifySender] selftest → GET /me: {status_code} authenticated={authenticated}")
+    # Pass the actor's richer diagnostic fields straight through so the caller
+    # can see the redirect chain / cookie names without another round-trip.
+    passthrough = {
+        k: item[k]
+        for k in ("hop1_status", "hop1_redirect_location", "final_url",
+                  "set_cookie_count", "set_cookie_names", "body_snippet")
+        if k in item
+    }
     return {
         "success": success,
         "stage": "voyager_call",
@@ -156,4 +164,5 @@ def apify_selftest() -> dict:
         "status_code": status_code,
         "authenticated": authenticated,
         "detail": item.get("detail", ""),
+        **passthrough,
     }
