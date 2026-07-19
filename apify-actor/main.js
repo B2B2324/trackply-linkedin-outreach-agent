@@ -94,6 +94,15 @@ const sendCookies = new Map();
 sendCookies.set('li_at', realLiAtSend);
 sendCookies.set('JSESSIONID', `"${jsess}"`);
 const sendCookieHeader = () => [...sendCookies].map(([k, v]) => `${k}=${v}`).join('; ');
+
+// LinkedIn ROTATES JSESSIONID during the /feed/ warmup (Set-Cookie), and the
+// csrf-token header must equal the CURRENT cookie value. Freezing the header
+// at the env-var value made every write 401 while reads sailed through —
+// voyager validates CSRF on POST but not on GET, which is exactly why the
+// profile lookup succeeded and normInvitations returned "http=401" with an
+// empty body. Always read csrf from the live cookie jar, never from input.
+const currentCsrf = () => String(sendCookies.get('JSESSIONID') || jsess).replace(/"/g, '');
+const headersNow = (extra = {}) => ({ ...apiHeaders, 'csrf-token': currentCsrf(), ...extra });
 const sendMerge = (setC) => {
     for (const raw of (Array.isArray(setC) ? setC : [setC]).filter(Boolean)) {
         const [pair] = String(raw).split(';');
@@ -108,7 +117,8 @@ const hopOpts = { proxyUrl, throwHttpErrors: false, followRedirect: false };
 async function manualGet(url, headers, { hops = 4, responseType = 'text' } = {}) {
     let res; let cur = url;
     for (let i = 0; i < hops; i++) {
-        res = await gotScraping({ url: cur, headers: { ...headers, cookie: sendCookieHeader() }, responseType, ...hopOpts });
+        // csrf-token recomputed per hop: JSESSIONID can rotate on any response.
+        res = await gotScraping({ url: cur, headers: { ...headers, 'csrf-token': currentCsrf(), cookie: sendCookieHeader() }, responseType, ...hopOpts });
         sendMerge(res.headers?.['set-cookie'] || []);
         const loc = String(res.headers?.location || '');
         if (res.statusCode === 200 || !loc) break;
@@ -315,7 +325,7 @@ try {
             // the request to auth, so record it as a failure instead of looping.
             const res = await gotScraping({
                 url, method: 'POST',
-                headers: { ...apiHeaders, 'content-type': 'application/json', cookie: sendCookieHeader() },
+                headers: headersNow({ 'content-type': 'application/json', cookie: sendCookieHeader() }),
                 json: payload, responseType: 'json', ...hopOpts,
             });
             const ok = res.statusCode === 200 || res.statusCode === 201;
@@ -330,7 +340,8 @@ try {
                 const errHeader = res.headers?.['x-restli-error-response'] || res.headers?.['x-linkedin-error-response'] || '';
                 detail = loc
                     ? `voyager POST bounced (http=${res.statusCode} → ${loc.slice(0, 120)}) — session not accepted for this action`
-                    : `voyager POST rejected (http=${res.statusCode}${errHeader ? ` x-restli-error-response=${errHeader}` : ''}): ${bodyStr.slice(0, 400)}`;
+                    : `voyager POST rejected (http=${res.statusCode}${errHeader ? ` x-restli-error-response=${errHeader}` : ''}` +
+                      `, csrf_matched_cookie=${currentCsrf() === String(sendCookies.get('JSESSIONID') || '').replace(/"/g, '')}): ${bodyStr.slice(0, 400)}`;
             }
             result = { success: ok, status_code: res.statusCode, detail, request_payload: payload, request_url: url };
         }
