@@ -323,9 +323,27 @@ try {
             // Single-shot POST with the warmed-up manual cookie set. A redirect
             // on a voyager POST is never "follow me" — it's LinkedIn bouncing
             // the request to auth, so record it as a failure instead of looping.
+            // Browser-identical write headers. csrf matching the cookie is NOT
+            // sufficient: LinkedIn also requires a same-origin XHR shape on
+            // writes. Without origin/referer/sec-fetch-*, voyager answers 401
+            // with an empty body even when the session and csrf are perfect
+            // (proved live 2026-07-19: csrf_matched_cookie=true, still 401,
+            // while every GET on the same cookies returned 200).
+            const pageReferer = action === 'dm'
+                ? 'https://www.linkedin.com/messaging/'
+                : (profileUrl || 'https://www.linkedin.com/feed/');
             const res = await gotScraping({
                 url, method: 'POST',
-                headers: headersNow({ 'content-type': 'application/json', cookie: sendCookieHeader() }),
+                headers: headersNow({
+                    'content-type': 'application/json; charset=UTF-8',
+                    cookie: sendCookieHeader(),
+                    origin: 'https://www.linkedin.com',
+                    referer: pageReferer,
+                    'sec-fetch-site': 'same-origin',
+                    'sec-fetch-mode': 'cors',
+                    'sec-fetch-dest': 'empty',
+                    'x-li-lang': 'en_US',
+                }),
                 json: payload, responseType: 'json', ...hopOpts,
             });
             const ok = res.statusCode === 200 || res.statusCode === 201;
@@ -338,10 +356,17 @@ try {
                 // error-response header so a rejection is legible, not a guess.
                 const bodyStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body || {});
                 const errHeader = res.headers?.['x-restli-error-response'] || res.headers?.['x-linkedin-error-response'] || '';
+                // A 401 with an empty body carries its real reason in the
+                // response headers (www-authenticate, x-li-* trace ids), so
+                // surface them rather than reporting another blank rejection.
+                const hdrs = Object.entries(res.headers || {})
+                    .filter(([k]) => /^(www-authenticate|x-li-|x-restli|x-msedge|location)/i.test(k))
+                    .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`).join(' ');
                 detail = loc
                     ? `voyager POST bounced (http=${res.statusCode} → ${loc.slice(0, 120)}) — session not accepted for this action`
                     : `voyager POST rejected (http=${res.statusCode}${errHeader ? ` x-restli-error-response=${errHeader}` : ''}` +
-                      `, csrf_matched_cookie=${currentCsrf() === String(sendCookies.get('JSESSIONID') || '').replace(/"/g, '')}): ${bodyStr.slice(0, 400)}`;
+                      `, csrf_matched_cookie=${currentCsrf() === String(sendCookies.get('JSESSIONID') || '').replace(/"/g, '')}` +
+                      `${hdrs ? ` | ${hdrs}` : ''}): ${bodyStr.slice(0, 300)}`;
             }
             result = { success: ok, status_code: res.statusCode, detail, request_payload: payload, request_url: url };
         }
