@@ -38,13 +38,25 @@ const proxyConfiguration = await Actor.createProxyConfiguration({
     groups: ['RESIDENTIAL'],
     countryCode: 'US',
 });
-// STICKY SESSION — pin every hop to ONE residential IP. Without a session id,
-// Apify rotates the exit IP per request; LinkedIn binds __cf_bm/lidc to the IP
-// that issued them, so the next hop (different IP) is treated as a fresh
-// visitor and 302-loops forever even with a valid li_at. A single session id
-// makes all requests share one IP, so the bootstrap cookies converge.
-const sessionId = `maya_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+// STICKY SESSION — pin every hop to ONE residential IP.
+//
+// This id MUST be stable ACROSS RUNS, not just within one. It used to be
+// `maya_${Date.now()}_${random}`, which is unique per actor run — and since
+// Maya invokes this actor once PER LEAD, a 40-lead run drove the account
+// through 40 different residential IPs in minutes. LinkedIn treats an
+// established session suddenly hopping IPs as session theft: it silently
+// invalidates li_at, which is exactly the observed cycle (re-capture cookies →
+// selftest green → run sends → session dead again, three times over).
+//
+// A day-stable id keeps every request on ONE IP (Apify holds a residential
+// session's IP for ~24h), so the account looks like one consistent device.
+// It rolls daily so a dead/blocked exit node can't strand us forever, and
+// MAYA_PROXY_SESSION can pin it explicitly if a specific IP must be kept.
+const daySalt = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+const sessionId = (process.env.MAYA_PROXY_SESSION || `maya_us_${daySalt}`)
+    .replace(/[^a-zA-Z0-9_]/g, '').slice(0, 50);
 const proxyUrl = await proxyConfiguration.newUrl(sessionId);
+console.log(`[voyager-send] proxy session=${sessionId} (stable across runs — do not randomise)`);
 
 // LinkedIn's csrf-token header MUST equal the JSESSIONID cookie value; deriving
 // it from JSESSIONID makes a mismatch impossible.
