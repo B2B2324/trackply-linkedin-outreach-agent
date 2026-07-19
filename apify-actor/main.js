@@ -287,35 +287,71 @@ try {
             };
         } else {
             const memberNum = urn.split(':').pop();
-            let url;
-            let payload;
+            // Endpoint CANDIDATES, current API first.
+            //
+            // growth/normInvitations is LinkedIn's LEGACY invite route. With a
+            // valid session and a matching csrf token it still answers 401 with
+            // an empty body and no auth challenge (proved live 2026-07-19,
+            // including with full browser XHR headers) — which is how voyager
+            // reports a retired route, not an auth problem. The current web
+            // client posts to the Dash relationships endpoint instead, so try
+            // that first and keep the legacy shape as a fallback. Whichever
+            // returns 200/201 is reported in `endpoint_used`.
+            let candidates;
             if (action === 'connection_request') {
-                url = `${BASE}/growth/normInvitations`;
-                payload = {
-                    emberEntityName: 'growth/invitation/norm-invitation',
-                    invitee: {
-                        'com.linkedin.voyager.growth.invitation.InviteeProfile': { profileId: memberNum },
+                candidates = [
+                    {
+                        name: 'dash/verifyQuotaAndCreateV2',
+                        url: `${BASE}/voyagerRelationshipsDashMemberRelationships?action=verifyQuotaAndCreateV2`,
+                        payload: {
+                            inviteeProfileUrn: urn,
+                            ...(message ? { customMessage: message.slice(0, 300) } : {}),
+                        },
                     },
-                    trackingId: trackingId(),
-                };
-                if (message) payload.message = message.slice(0, 300);
+                    {
+                        name: 'legacy/normInvitations',
+                        url: `${BASE}/growth/normInvitations`,
+                        payload: {
+                            emberEntityName: 'growth/invitation/norm-invitation',
+                            invitee: {
+                                'com.linkedin.voyager.growth.invitation.InviteeProfile': { profileId: memberNum },
+                            },
+                            trackingId: trackingId(),
+                            ...(message ? { message: message.slice(0, 300) } : {}),
+                        },
+                    },
+                ];
             } else if (action === 'dm') {
-                url = `${BASE}/messaging/conversations`;
-                payload = {
-                    keyVersion: 'LEGACY_INBOX',
-                    conversationCreate: {
-                        eventCreate: {
-                            value: {
-                                'com.linkedin.voyager.messaging.create.MessageCreate': {
-                                    attributedBody: { text: message, attributes: [] },
-                                    attachments: [],
+                candidates = [
+                    {
+                        name: 'dash/createMessage',
+                        url: `${BASE}/voyagerMessagingDashMessengerMessages?action=createMessage`,
+                        payload: {
+                            message: { body: { text: message, attributes: [] }, renderContentUnions: [] },
+                            hostRecipientUrns: [urn],
+                            dedupeByClientGeneratedToken: false,
+                        },
+                    },
+                    {
+                        name: 'legacy/messagingConversations',
+                        url: `${BASE}/messaging/conversations`,
+                        payload: {
+                            keyVersion: 'LEGACY_INBOX',
+                            conversationCreate: {
+                                eventCreate: {
+                                    value: {
+                                        'com.linkedin.voyager.messaging.create.MessageCreate': {
+                                            attributedBody: { text: message, attributes: [] },
+                                            attachments: [],
+                                        },
+                                    },
                                 },
+                                recipients: [urn],
+                                subtype: 'MEMBER_TO_MEMBER',
                             },
                         },
-                        recipients: [urn],
-                        subtype: 'MEMBER_TO_MEMBER',
                     },
-                };
+                ];
             } else {
                 throw new Error(`Unknown action: ${action}`);
             }
@@ -332,43 +368,54 @@ try {
             const pageReferer = action === 'dm'
                 ? 'https://www.linkedin.com/messaging/'
                 : (profileUrl || 'https://www.linkedin.com/feed/');
-            const res = await gotScraping({
-                url, method: 'POST',
-                headers: headersNow({
-                    'content-type': 'application/json; charset=UTF-8',
-                    cookie: sendCookieHeader(),
-                    origin: 'https://www.linkedin.com',
-                    referer: pageReferer,
-                    'sec-fetch-site': 'same-origin',
-                    'sec-fetch-mode': 'cors',
-                    'sec-fetch-dest': 'empty',
-                    'x-li-lang': 'en_US',
-                }),
-                json: payload, responseType: 'json', ...hopOpts,
-            });
-            const ok = res.statusCode === 200 || res.statusCode === 201;
-            let detail = 'sent';
+
+            // Try each candidate endpoint until one is accepted. Single-shot
+            // POSTs: a redirect on a voyager write is an auth bounce, never a
+            // "follow me", so it is recorded rather than followed.
+            const attempts = [];
+            let res = null; let ok = false; let used = null;
+            for (const cand of candidates) {
+                res = await gotScraping({
+                    url: cand.url, method: 'POST',
+                    headers: headersNow({
+                        'content-type': 'application/json; charset=UTF-8',
+                        cookie: sendCookieHeader(),
+                        origin: 'https://www.linkedin.com',
+                        referer: pageReferer,
+                        'sec-fetch-site': 'same-origin',
+                        'sec-fetch-mode': 'cors',
+                        'sec-fetch-dest': 'empty',
+                        'x-li-lang': 'en_US',
+                    }),
+                    json: cand.payload, responseType: 'json', ...hopOpts,
+                });
+                ok = res.statusCode === 200 || res.statusCode === 201;
+                const bodyStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body || {});
+                attempts.push(`${cand.name}=${res.statusCode}${ok ? '' : `:${bodyStr.slice(0, 120)}`}`);
+                console.log(`[voyager-send] ${cand.name} → http=${res.statusCode}`);
+                if (ok) { used = cand.name; break; }
+            }
+
+            let detail = used ? `sent via ${used}` : '';
             if (!ok) {
                 const loc = String(res.headers?.location || '');
-                // Rich diagnostics: LinkedIn's rest.li error envelope carries the
-                // real reason in serviceErrorCode/message/errorDetails, not just
-                // the raw body — surface HTTP status + those fields + the LI
-                // error-response header so a rejection is legible, not a guess.
+                // LinkedIn's rest.li error envelope carries the real reason in
+                // serviceErrorCode/message; a bare 401 puts it in the response
+                // headers instead. Surface both, plus every endpoint tried, so
+                // a rejection is legible rather than another blank body.
                 const bodyStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body || {});
                 const errHeader = res.headers?.['x-restli-error-response'] || res.headers?.['x-linkedin-error-response'] || '';
-                // A 401 with an empty body carries its real reason in the
-                // response headers (www-authenticate, x-li-* trace ids), so
-                // surface them rather than reporting another blank rejection.
                 const hdrs = Object.entries(res.headers || {})
                     .filter(([k]) => /^(www-authenticate|x-li-|x-restli|x-msedge|location)/i.test(k))
-                    .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`).join(' ');
+                    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`).join(' ');
                 detail = loc
                     ? `voyager POST bounced (http=${res.statusCode} → ${loc.slice(0, 120)}) — session not accepted for this action`
-                    : `voyager POST rejected (http=${res.statusCode}${errHeader ? ` x-restli-error-response=${errHeader}` : ''}` +
+                    : `all endpoints rejected [${attempts.join(' | ')}]` +
+                      `${errHeader ? ` x-restli-error-response=${errHeader}` : ''}` +
                       `, csrf_matched_cookie=${currentCsrf() === String(sendCookies.get('JSESSIONID') || '').replace(/"/g, '')}` +
-                      `${hdrs ? ` | ${hdrs}` : ''}): ${bodyStr.slice(0, 300)}`;
+                      `${hdrs ? ` | ${hdrs}` : ''}: ${bodyStr.slice(0, 200)}`;
             }
-            result = { success: ok, status_code: res.statusCode, detail, request_payload: payload, request_url: url };
+            result = { success: ok, status_code: res?.statusCode, detail, endpoint_used: used, attempts };
         }
     }
 } catch (e) {
