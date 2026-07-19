@@ -310,13 +310,17 @@ try {
             let detail = 'sent';
             if (!ok) {
                 const loc = String(res.headers?.location || '');
+                // Rich diagnostics: LinkedIn's rest.li error envelope carries the
+                // real reason in serviceErrorCode/message/errorDetails, not just
+                // the raw body — surface HTTP status + those fields + the LI
+                // error-response header so a rejection is legible, not a guess.
+                const bodyStr = typeof res.body === 'string' ? res.body : JSON.stringify(res.body || {});
+                const errHeader = res.headers?.['x-restli-error-response'] || res.headers?.['x-linkedin-error-response'] || '';
                 detail = loc
-                    ? `voyager POST bounced (${res.statusCode} → ${loc.slice(0, 120)}) — session not accepted for this action`
-                    : (typeof res.body === 'string'
-                        ? res.body.slice(0, 200)
-                        : JSON.stringify(res.body || {}).slice(0, 200));
+                    ? `voyager POST bounced (http=${res.statusCode} → ${loc.slice(0, 120)}) — session not accepted for this action`
+                    : `voyager POST rejected (http=${res.statusCode}${errHeader ? ` x-restli-error-response=${errHeader}` : ''}): ${bodyStr.slice(0, 400)}`;
             }
-            result = { success: ok, status_code: res.statusCode, detail };
+            result = { success: ok, status_code: res.statusCode, detail, request_payload: payload, request_url: url };
         }
     }
 } catch (e) {
