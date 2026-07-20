@@ -273,12 +273,22 @@ def personalizer_node(state: OutreachState) -> OutreachState:
 
 def _live_send(action: str, profile_url: str, message: str, target: dict) -> dict:
     """
-    Send a connection request or DM via the LinkedIn voyager API, routed
-    through Apify's residential proxy to avoid Railway datacenter IP blocks.
-    Falls back to direct (no proxy) if APIFY_TOKEN is absent.
+    Send a connection request or DM via the LinkedIn voyager API.
+
+    SENDER_MODE selects the egress path (defaults to 'apify' — unchanged
+    behaviour unless you opt in):
+      apify → owned Apify actor on a residential IP (src/apify_sender.py).
+      local → direct from THIS machine's IP (src/local_sender.py). Use this
+              to test whether LinkedIn accepts writes from a home IP but 401s
+              them from cloud IPs. Must run where you can log into LinkedIn.
+
     Returns {"success": bool, "detail": str}.
     """
+    mode = (os.environ.get("SENDER_MODE") or "apify").strip().lower()
     try:
+        if mode == "local":
+            from src.local_sender import local_live_send
+            return local_live_send(action, profile_url, message, target)
         from src.apify_sender import apify_live_send
         return apify_live_send(action, profile_url, message, target)
     except Exception as e:
